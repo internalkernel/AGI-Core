@@ -1,0 +1,9 @@
+{
+  "id": "smart-router",
+  "kind": "model-router",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}

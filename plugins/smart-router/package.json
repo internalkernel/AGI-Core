@@ -1,0 +1,28 @@
+{
+  "name": "@local/smart-router",
+  "version": "1.0.0",
+  "description": "Intelligent model routing for OpenClaw using 14-dimension scoring",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.40.0",
+    "openai": "^4.77.0",
+    "@google/generative-ai": "^0.21.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2",
+    "@types/node": "^22.10.2"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "openclaw": {
+    "extensions": [
+      "./dist/index.js"
+    ]
+  }
+}
