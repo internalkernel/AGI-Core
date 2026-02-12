@@ -1,0 +1,12 @@
+{
+  "agents": {
+    "defaults": {
+      "model": {
+        "primary": "smart-router/auto"
+      }
+    }
+  },
+  "gateway": {
+    "mode": "local"
+  }
+}

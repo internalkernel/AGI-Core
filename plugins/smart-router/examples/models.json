@@ -1,0 +1,54 @@
+{
+  "providers": {
+    "synthetic": {
+      "baseUrl": "https://api.synthetic.new/anthropic",
+      "api": "anthropic-messages",
+      "models": [
+        {
+          "id": "hf:moonshotai/Kimi-K2.5",
+          "name": "Kimi K2.5",
+          "reasoning": true,
+          "input": ["text"],
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+          "contextWindow": 256000,
+          "maxTokens": 8192
+        },
+        {
+          "id": "hf:moonshotai/Kimi-K2-Thinking",
+          "name": "Kimi K2 Thinking",
+          "reasoning": true,
+          "input": ["text"],
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+          "contextWindow": 256000,
+          "maxTokens": 8192
+        }
+      ],
+      "apiKey": "SYNTHETIC_API_KEY"
+    },
+    "smart-router": {
+      "baseUrl": "http://127.0.0.1:9999/v1",
+      "api": "openai-completions",
+      "models": [
+        {
+          "id": "auto",
+          "name": "Smart Router (Auto)",
+          "reasoning": false,
+          "input": ["text"],
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+          "contextWindow": 256000,
+          "maxTokens": 8192
+        },
+        {
+          "id": "ondemand",
+          "name": "Smart Router (On-Demand)",
+          "reasoning": false,
+          "input": ["text"],
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+          "contextWindow": 256000,
+          "maxTokens": 8192
+        }
+      ],
+      "apiKey": "SMART_ROUTER_API_KEY"
+    }
+  }
+}
