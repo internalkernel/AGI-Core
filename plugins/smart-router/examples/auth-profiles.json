@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "profiles": {
+    "synthetic:default": {
+      "type": "api_key",
+      "provider": "synthetic",
+      "key": "YOUR_SYNTHETIC_API_KEY"
+    },
+    "smart-router:default": {
+      "type": "api_key",
+      "provider": "smart-router",
+      "key": "local-plugin-no-key-needed"
+    }
+  }
+}

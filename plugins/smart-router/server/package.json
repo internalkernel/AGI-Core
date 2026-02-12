@@ -1,0 +1,9 @@
+{
+  "name": "smart-router-server",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "server.js",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0"
+  }
+}
