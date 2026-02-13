@@ -11,22 +11,23 @@ SKILLS_DIR="$OPENCLAW_DIR/skills"
 echo "🚀 Setting up multi-agent workspaces for OpenClaw"
 echo ""
 
-# Create workspaces directory
-echo "📁 Creating workspaces directory structure..."
+# Create workspaces directory (for shared memory only)
+echo "📁 Creating workspace directory structure..."
 mkdir -p "$WORKSPACES_DIR"
 
 # Define agents
+# NOTE: OpenClaw profile-based agents use ~/.openclaw/workspace-<name>/
+# (no 's', no 'agent-' prefix). The 'shared' workspace goes under workspaces/.
 agents=(
-    "agent-content-specialist"
-    "agent-devops"
-    "agent-support-coordinator"
-    "agent-wealth-strategist"
-    "shared"  # Shared memory space
+    "content-specialist"
+    "devops"
+    "support-coordinator"
+    "wealth-strategist"
 )
 
 # Create workspace for each agent
 for agent in "${agents[@]}"; do
-    workspace="$WORKSPACES_DIR/$agent"
+    workspace="$OPENCLAW_DIR/workspace-$agent"
 
     if [ -d "$workspace" ]; then
         echo "  ✓ Workspace exists: $agent"
@@ -42,8 +43,7 @@ for agent in "${agents[@]}"; do
     mkdir -p "$workspace/cache"
 
     # Create a README for each workspace
-    if [ "$agent" != "shared" ]; then
-        cat > "$workspace/README.md" << EOF
+    cat > "$workspace/README.md" << EOF
 # ${agent} Workspace
 
 This workspace is dedicated to the \`${agent}\` agent.
@@ -60,7 +60,7 @@ This workspace is dedicated to the \`${agent}\` agent.
 This workspace should be accessed with:
 \`\`\`bash
 export OPENCLAW_WORKSPACE="${workspace}"
-export OPENCLAW_AGENT_ID="${agent#agent-}"
+export OPENCLAW_AGENT_ID="${agent}"
 \`\`\`
 
 ## Memory Usage
@@ -76,8 +76,18 @@ uv run ~/.openclaw/skills/local-semantic-memory/local-semantic-memory.py search 
 uv run ~/.openclaw/skills/local-semantic-memory/local-semantic-memory.py stats
 \`\`\`
 EOF
-    else
-        cat > "$workspace/README.md" << EOF
+done
+
+# Create shared workspace separately
+shared="$WORKSPACES_DIR/shared"
+if [ -d "$shared" ]; then
+    echo "  ✓ Workspace exists: shared"
+else
+    echo "  + Creating workspace: shared"
+    mkdir -p "$shared"
+fi
+mkdir -p "$shared/memory" "$shared/vector_db" "$shared/logs" "$shared/cache"
+cat > "$shared/README.md" << EOF
 # Shared Memory Workspace
 
 This workspace contains memories shared across all agents.
@@ -92,14 +102,12 @@ uv run ~/.openclaw/skills/local-semantic-memory/local-semantic-memory.py --share
 
 Shared memories are accessible to all agents regardless of their individual workspace.
 EOF
-    fi
-done
 
 echo ""
 echo "✅ Workspace setup complete!"
 echo ""
 echo "📊 Workspace Summary:"
-ls -la "$WORKSPACES_DIR" | tail -n +4 | awk '{print "  - " $9}'
+for a in "${agents[@]}"; do echo "  - workspace-$a"; done; echo "  - workspaces/shared"
 echo ""
 
 # Check if Ollama is running
