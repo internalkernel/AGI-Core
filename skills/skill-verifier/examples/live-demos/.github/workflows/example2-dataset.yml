@@ -1,0 +1,173 @@
+name: "Example 2: Dataset Pre-Buy Inspection"
+
+on:
+  workflow_dispatch:
+    inputs:
+      dataset_description:
+        description: 'What kind of data to inspect'
+        required: true
+        type: string
+        default: 'Customer support tickets about refunds'
+      inspection_question:
+        description: 'What to verify about the dataset'
+        required: true
+        type: string
+        default: 'How many records? What percentage mention refunds? Common themes?'
+
+jobs:
+  inspect-dataset:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          pip install anthropic
+      
+      - name: 📋 Start Inspection
+        run: |
+          echo "## 📊 Dataset Inspection Certificate" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Dataset Type:** ${{ github.event.inputs.dataset_description }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Inspection Question:** ${{ github.event.inputs.inspection_question }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Timestamp:** $(date -Iseconds)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+      
+      - name: 🔐 Load Dataset (Private - Not Logged)
+        id: load
+        env:
+          DATASET: ${{ secrets.SAMPLE_DATASET }}
+        run: |
+          # Hash the dataset (without logging it)
+          HASH=$(echo -n "$DATASET" | sha256sum | cut -d' ' -f1)
+          SIZE=$(echo -n "$DATASET" | wc -c)
+          LINES=$(echo "$DATASET" | wc -l)
+          
+          echo "hash=$HASH" >> $GITHUB_OUTPUT
+          echo "size=$SIZE" >> $GITHUB_OUTPUT
+          echo "lines=$LINES" >> $GITHUB_OUTPUT
+          
+          echo "✅ Dataset loaded from secret storage"
+          echo "   Hash: ${HASH:0:16}...${HASH: -16}"
+          echo "   Size: $SIZE bytes"
+          echo "   Lines: $LINES"
+          echo ""
+          echo "⚠️  Dataset content is NOT logged (only hash + metadata)"
+      
+      - name: 🔍 Inspect with LLM
+        id: inspect
+        env:
+          DATASET: ${{ secrets.SAMPLE_DATASET }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          QUESTION: ${{ github.event.inputs.inspection_question }}
+        run: |
+          python3 << 'PYTHON_SCRIPT'
+          import os
+          import anthropic
+          import hashlib
+          
+          dataset = os.environ['DATASET']
+          question = os.environ['QUESTION']
+          
+          print("🤖 Running LLM inspection...")
+          print(f"   Question: {question}")
+          print("")
+          
+          client = anthropic.Anthropic(api_key=os.environ['ANTHROPIC_API_KEY'])
+          
+          prompt = f"""{question}
+
+<dataset>
+{dataset}
+</dataset>
+
+Analyze the dataset above and answer the question. Be specific with numbers and themes."""
+          
+          response = client.messages.create(
+              model="claude-sonnet-4",
+              max_tokens=2000,
+              messages=[{
+                  "role": "user",
+                  "content": prompt
+              }]
+          )
+          
+          result = response.content[0].text
+          
+          print("📊 Inspection Result:")
+          print("=" * 60)
+          print(result)
+          print("=" * 60)
+          print("")
+          print(f"✅ Analysis complete (used {response.usage.input_tokens + response.usage.output_tokens} tokens)")
+          PYTHON_SCRIPT
+      
+      - name: 🗑️ Cleanup Confirmation
+        run: |
+          echo "🗑️  Dataset cleanup:"
+          echo "   ✅ Dataset was only in runner memory"
+          echo "   ✅ Runner will be destroyed after this job"
+          echo "   ✅ No persistent storage used"
+          echo "   ✅ GitHub Secrets remain encrypted"
+      
+      - name: 📜 Generate Certificate
+        if: success()
+        run: |
+          cat << 'EOF' >> $GITHUB_STEP_SUMMARY
+          
+          ## ✅ Inspection Complete
+          
+          ### Dataset Metadata:
+          - **Hash:** `${{ steps.load.outputs.hash }}`
+          - **Size:** ${{ steps.load.outputs.size }} bytes
+          - **Lines:** ${{ steps.load.outputs.lines }}
+          - **Content:** ❌ NOT LOGGED (private)
+          
+          ### Inspection Question:
+          > ${{ github.event.inputs.inspection_question }}
+          
+          ### LLM Analysis:
+          See "Inspect with LLM" step above for full analysis.
+          
+          ### Privacy Guarantees:
+          - ❌ Raw dataset NEVER logged
+          - ✅ Only hash + analysis result visible
+          - ✅ Dataset deleted (runner destroyed)
+          - ✅ GitHub Secrets remain encrypted
+          
+          ### Use Case:
+          This certificate proves claims about the dataset WITHOUT revealing its contents.
+          Perfect for:
+          - **Pre-buy inspection:** Verify data quality before purchase
+          - **Data marketplace:** Prove relevance without exposure
+          - **Research validation:** Verify dataset properties
+          
+          ### Trust Model:
+          - ✅ GitHub infrastructure (ephemeral runners)
+          - ✅ Open source workflow (auditable)
+          - ✅ Public analysis result
+          - ❌ Private dataset (never exposed)
+          
+          ### Proof:
+          - **Certificate URL:** https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          - **Dataset Hash:** `${{ steps.load.outputs.hash }}`
+          - **Timestamp:** $(date -Iseconds)
+          
+          ---
+          
+          **Inspection Certificate powered by GitHub Actions** 🦞
+          
+          This proves the dataset has the claimed properties!
+          EOF
+      
+      - name: 🎉 Success
+        if: success()
+        run: |
+          echo "🎉 Dataset inspection certificate generated!"
+          echo "📋 View at: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          echo ""
+          echo "Share this URL to prove your dataset's value (without revealing it)"

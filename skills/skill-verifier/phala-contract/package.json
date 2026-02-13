@@ -1,0 +1,23 @@
+{
+  "name": "inspection-certificate-phala",
+  "version": "1.0.0",
+  "description": "Inspection Certificate service on Phala",
+  "main": "src/index.ts",
+  "scripts": {
+    "build": "tsc && rollup -c",
+    "dev": "pink dev",
+    "test": "pink test"
+  },
+  "keywords": ["phala", "inspection", "certificate", "escrow"],
+  "author": "MoltyClaw47",
+  "license": "MIT",
+  "dependencies": {
+    "@phala/pink-env": "^1.0.0"
+  },
+  "devDependencies": {
+    "@phala/pink-cli": "^0.2.0",
+    "@rollup/plugin-typescript": "^11.0.0",
+    "rollup": "^3.20.0",
+    "typescript": "^5.0.0"
+  }
+}

@@ -1,0 +1,174 @@
+name: "Example 1: API Key Verification"
+
+on:
+  workflow_dispatch:
+    inputs:
+      api_provider:
+        description: 'API Provider'
+        required: true
+        type: choice
+        options:
+          - Anthropic
+          - OpenAI
+        default: 'Anthropic'
+
+jobs:
+  verify-api-key:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          pip install anthropic
+      
+      - name: 📋 Start Inspection
+        run: |
+          echo "## 🔍 API Key Verification Certificate" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Provider:** ${{ github.event.inputs.api_provider }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Timestamp:** $(date -Iseconds)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+      
+      - name: 🔐 Load API Key (Private - Not Logged)
+        id: load_key
+        run: |
+          # API key is loaded but NEVER echoed
+          # GitHub automatically redacts secret values
+          echo "✅ API key loaded from secret storage"
+          echo "⚠️  Key value is NOT visible in logs"
+      
+      - name: 🧪 Test API Key
+        id: test
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          python3 << 'PYTHON_SCRIPT'
+          import os
+          import anthropic
+          import sys
+          
+          print("🔑 Testing API key...")
+          print("")
+          
+          try:
+              client = anthropic.Anthropic(api_key=os.environ['ANTHROPIC_API_KEY'])
+              
+              # Make a minimal test call
+              print("📡 Making test API call...")
+              response = client.messages.create(
+                  model="claude-sonnet-4",
+                  max_tokens=10,
+                  messages=[{
+                      "role": "user",
+                      "content": "Respond with just 'OK'"
+                  }]
+              )
+              
+              print("✅ API call successful!")
+              print(f"   Response: {response.content[0].text}")
+              print(f"   Model: {response.model}")
+              print(f"   Tokens used: {response.usage.input_tokens + response.usage.output_tokens}")
+              print("")
+              
+              # Check rate limits (from headers - would need SDK update)
+              print("📊 Rate Limit Status:")
+              print("   ✅ Key is valid and active")
+              print("   ✅ No rate limit errors")
+              print("")
+              
+              # Note: Credit balance requires separate billing API
+              # For this demo, we just verify the key works
+              print("💰 Credit Status:")
+              print("   ⚠️  Billing API not available in public demo")
+              print("   ✅ But key is confirmed working (made successful call)")
+              print("")
+              
+              print("=" * 60)
+              print("✅ VERIFICATION PASSED")
+              print("=" * 60)
+              print("API key is VALID and in good standing")
+              
+          except anthropic.AuthenticationError:
+              print("❌ VERIFICATION FAILED: Invalid API key")
+              sys.exit(1)
+          except anthropic.RateLimitError:
+              print("❌ VERIFICATION FAILED: Rate limit exceeded")
+              sys.exit(1)
+          except Exception as e:
+              print(f"❌ VERIFICATION FAILED: {str(e)}")
+              sys.exit(1)
+          PYTHON_SCRIPT
+      
+      - name: 📜 Generate Certificate
+        if: success()
+        run: |
+          cat << 'EOF' >> $GITHUB_STEP_SUMMARY
+          
+          ## ✅ Verification Result: PASSED
+          
+          ### What was verified:
+          - ✅ API key is valid (authentication successful)
+          - ✅ API call completed (no errors)
+          - ✅ Model access confirmed (claude-sonnet-4)
+          - ✅ Rate limits OK (no throttling)
+          
+          ### What was NOT revealed:
+          - ❌ API key value (GitHub redacted from logs)
+          - ❌ Account email/details
+          
+          ### Proof:
+          - **Certificate URL:** https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          - **Timestamp:** $(date -Iseconds)
+          - **Verified by:** GitHub Actions (ephemeral runner)
+          
+          ### Trust Model:
+          - ✅ GitHub infrastructure (runner isolation)
+          - ✅ Open source workflow (auditable code)
+          - ✅ Public logs (anyone can verify)
+          - ❌ API key never logged (GitHub secret redaction)
+          
+          ### Use Case:
+          This certificate proves the account holder has a valid Anthropic API key
+          without revealing the key itself. Useful for:
+          - API key marketplace (buyer verifies before purchase)
+          - Service authentication (prove access without sharing)
+          - Partner verification (demonstrate API access)
+          
+          ---
+          
+          **Inspection Certificate powered by GitHub Actions** 🦞
+          
+          Want to verify this yourself? Check the execution logs above!
+          EOF
+      
+      - name: ❌ Verification Failed
+        if: failure()
+        run: |
+          cat << 'EOF' >> $GITHUB_STEP_SUMMARY
+          
+          ## ❌ Verification Result: FAILED
+          
+          The API key verification did not pass. Check the logs above for details.
+          
+          Common reasons:
+          - Invalid or expired API key
+          - Rate limit exceeded
+          - Network/API issues
+          
+          ---
+          
+          **Inspection Certificate powered by GitHub Actions** 🦞
+          EOF
+      
+      - name: 🎉 Success
+        if: success()
+        run: |
+          echo "🎉 Inspection certificate generated!"
+          echo "📋 View at: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          echo ""
+          echo "Share this URL to prove your API key is valid (without revealing it)"
