@@ -24,13 +24,13 @@ Usage:
     uv run local-semantic-memory.py add "User prefers Python"
 
     # Explicit workspace
-    uv run local-semantic-memory.py --workspace ~/.openclaw/workspaces/agent-research add "Deep research findings"
+    uv run local-semantic-memory.py --workspace ~/.openclaw/workspace-research add "Deep research findings"
 
     # Shared memory across all agents
     uv run local-semantic-memory.py --shared add "Company-wide knowledge"
 
     # Search in specific workspace
-    uv run local-semantic-memory.py --workspace ~/.openclaw/workspaces/agent-coding search "Python best practices"
+    uv run local-semantic-memory.py --workspace ~/.openclaw/workspace-coding search "Python best practices"
 
 Environment Variables:
     OPENCLAW_WORKSPACE     - Explicit workspace path
@@ -191,6 +191,10 @@ class LocalSemanticMemory:
                 openclaw_base / "workspace",
                 openclaw_base / "workspaces",
             ]
+            # Also allow workspace-<name> directories (profile-based workspaces)
+            if workspace_path_resolved.parent == openclaw_base.resolve():
+                if workspace_path_resolved.name.startswith("workspace-"):
+                    is_valid = True
 
             is_valid = any(
                 str(workspace_path_resolved).startswith(str(base.resolve()))
@@ -472,7 +476,7 @@ Examples:
   uv run local-semantic-memory.py add "User prefers Python"
   
   # Specific workspace
-  uv run local-semantic-memory.py --workspace ~/.openclaw/workspaces/agent-research add "Research finding"
+  uv run local-semantic-memory.py --workspace ~/.openclaw/workspace-research add "Research finding"
   
   # Shared memory
   uv run local-semantic-memory.py --shared add "Company knowledge"

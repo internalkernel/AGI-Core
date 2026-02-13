@@ -52,26 +52,27 @@ pm2 restart ecosystem.config.js
 After setup, you'll have:
 
 ```
-~/.openclaw/workspaces/
-├── agent-content-specialist/
+~/.openclaw/
+├── workspace-content-specialist/
 │   ├── memory/           # Daily logs
 │   ├── vector_db/        # ChromaDB database
 │   ├── logs/             # Agent logs
 │   ├── cache/            # Temp files
 │   ├── .memory.lock      # Concurrency lock (auto-created)
 │   └── README.md
-├── agent-devops/
+├── workspace-devops/
 │   ├── memory/
 │   ├── vector_db/
 │   └── ...
-├── agent-support-coordinator/
+├── workspace-support-coordinator/
 │   └── ...
-├── agent-wealth-strategist/
+├── workspace-wealth-strategist/
 │   └── ...
-└── shared/               # Cross-agent shared memory
-    ├── memory/
-    ├── vector_db/
-    └── README.md
+└── workspaces/
+    └── shared/           # Cross-agent shared memory
+        ├── memory/
+        ├── vector_db/
+        └── README.md
 ```
 
 ---
@@ -84,7 +85,7 @@ Your `ecosystem.config.js` has been updated with agent identity variables:
 {
   name: 'openclaw-content-specialist',
   env: {
-    OPENCLAW_WORKSPACE: '/root/.openclaw/workspaces/agent-content-specialist',
+    OPENCLAW_WORKSPACE: '/root/.openclaw/workspace-content-specialist',
     OPENCLAW_AGENT_ID: 'content-specialist',
     OPENCLAW_AGENT_NAME: 'Content Specialist Agent',
     OPENCLAW_PORT: '8410'
@@ -96,7 +97,7 @@ Your `ecosystem.config.js` has been updated with agent identity variables:
 
 | Variable | Purpose | Example |
 |----------|---------|---------|
-| `OPENCLAW_WORKSPACE` | Agent's isolated workspace path | `~/.openclaw/workspaces/agent-devops` |
+| `OPENCLAW_WORKSPACE` | Agent's isolated workspace path | `~/.openclaw/workspace-devops` |
 | `OPENCLAW_AGENT_ID` | Unique agent identifier for tracking | `devops` |
 | `OPENCLAW_AGENT_NAME` | Human-readable agent name | `DevOps Agent` |
 | `OPENCLAW_PORT` | Agent's API port | `8420` |
@@ -125,7 +126,7 @@ uv run ~/.openclaw/skills/local-semantic-memory/local-semantic-memory.py stats
 ```bash
 # Specify a workspace explicitly
 uv run ~/.openclaw/skills/local-semantic-memory/local-semantic-memory.py \
-  --workspace ~/.openclaw/workspaces/agent-devops \
+  --workspace ~/.openclaw/workspace-devops \
   add "Deployed v2.3.0 to production"
 
 # Use shared memory
@@ -139,7 +140,7 @@ uv run ~/.openclaw/skills/local-semantic-memory/local-semantic-memory.py \
 ```bash
 # Agent A adds a memory
 OPENCLAW_AGENT_ID=content-specialist \
-OPENCLAW_WORKSPACE=~/.openclaw/workspaces/agent-content-specialist \
+OPENCLAW_WORKSPACE=~/.openclaw/workspace-content-specialist \
 uv run local-semantic-memory.py add "Blog post published on AI trends"
 
 # Agent B searches across shared knowledge
@@ -147,7 +148,7 @@ uv run local-semantic-memory.py --shared search "blog posts"
 
 # Agent C searches Agent A's workspace (if needed)
 uv run local-semantic-memory.py \
-  --workspace ~/.openclaw/workspaces/agent-content-specialist \
+  --workspace ~/.openclaw/workspace-content-specialist \
   search "AI trends"
 ```
 
@@ -180,7 +181,7 @@ uv run local-semantic-memory.py stats
 
 # Output:
 # 📊 Memory Statistics
-#    Current workspace: agent-devops
+#    Current workspace: workspace-devops
 #    Current agent: devops
 #    Total memories: 127
 #
@@ -273,7 +274,7 @@ ollama pull nomic-embed-text
 
 ```bash
 # Remove stale lock (only if agents are stopped)
-rm ~/.openclaw/workspaces/agent-*/. memory.lock
+rm ~/.openclaw/workspace-*/.memory.lock
 ```
 
 ### Workspace Permission Errors
@@ -373,7 +374,7 @@ def search_memory(query, n_results=5):
 # Test each agent's workspace
 for agent in content-specialist devops support-coordinator wealth-strategist; do
   echo "Testing agent: $agent"
-  OPENCLAW_WORKSPACE=~/.openclaw/workspaces/agent-$agent \
+  OPENCLAW_WORKSPACE=~/.openclaw/workspace-$agent \
   OPENCLAW_AGENT_ID=$agent \
   uv run ~/.openclaw/skills/local-semantic-memory/local-semantic-memory.py \
     add "Test memory for $agent"
@@ -397,7 +398,7 @@ echo "All writes completed successfully!"
 ```bash
 # Add to one agent
 OPENCLAW_AGENT_ID=devops \
-OPENCLAW_WORKSPACE=~/.openclaw/workspaces/agent-devops \
+OPENCLAW_WORKSPACE=~/.openclaw/workspace-devops \
 uv run local-semantic-memory.py add "DevOps deployed new feature"
 
 # Search from shared memory
@@ -405,7 +406,7 @@ uv run local-semantic-memory.py --shared search "deployed"
 
 # Verify stats show agent attribution
 uv run local-semantic-memory.py \
-  --workspace ~/.openclaw/workspaces/agent-devops \
+  --workspace ~/.openclaw/workspace-devops \
   stats
 ```
 
@@ -435,9 +436,9 @@ uv run local-semantic-memory.py \
 ## Support
 
 For issues or questions:
-1. Check `~/.openclaw/workspaces/<agent>/logs/` for agent-specific logs
+1. Check `~/.openclaw/workspace-<agent>/logs/` for agent-specific logs
 2. Verify environment variables: `pm2 env <agent-name>`
 3. Test Ollama: `ollama list` and `ollama serve`
-4. Review lock files: `ls ~/.openclaw/workspaces/*/.memory.lock`
+4. Review lock files: `ls ~/.openclaw/workspace-*/.memory.lock`
 
 The skill is now production-ready for multi-agent deployments! 🚀

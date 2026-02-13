@@ -90,7 +90,7 @@ workspace/
 
 | Variable | Purpose | Example |
 |----------|---------|---------|
-| `OPENCLAW_WORKSPACE` | Agent's workspace path | `~/.openclaw/workspaces/agent-name` |
+| `OPENCLAW_WORKSPACE` | Agent's workspace path | `~/.openclaw/workspace-devops` |
 | `OPENCLAW_AGENT_ID` | Agent identifier | `devops` |
 | `OPENCLAW_AGENT_NAME` | Human-readable agent name | `DevOps Agent` |
 

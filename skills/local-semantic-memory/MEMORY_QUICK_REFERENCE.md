@@ -34,7 +34,7 @@ uv run ~/.openclaw/skills/local-semantic-memory/local-semantic-memory.py consoli
 
 ```bash
 # Specific workspace
-uv run local-semantic-memory.py --workspace ~/.openclaw/workspaces/agent-devops add "text"
+uv run local-semantic-memory.py --workspace ~/.openclaw/workspace-devops add "text"
 
 # Shared memory
 uv run local-semantic-memory.py --shared add "shared knowledge"
@@ -55,10 +55,10 @@ uv run local-semantic-memory.py add "text" --category user_prefs
 
 | Agent | ID | Port | Workspace |
 |-------|-----|------|-----------|
-| Content Specialist | `content-specialist` | 8410 | `agent-content-specialist` |
-| DevOps | `devops` | 8420 | `agent-devops` |
-| Support Coordinator | `support-coordinator` | 8430 | `agent-support-coordinator` |
-| Wealth Strategist | `wealth-strategist` | 8440 | `agent-wealth-strategist` |
+| Content Specialist | `content-specialist` | 8410 | `workspace-content-specialist` |
+| DevOps | `devops` | 8420 | `workspace-devops` |
+| Support Coordinator | `support-coordinator` | 8430 | `workspace-support-coordinator` |
+| Wealth Strategist | `wealth-strategist` | 8440 | `workspace-wealth-strategist` |
 
 ## Troubleshooting
 
@@ -68,13 +68,13 @@ ollama list
 ps aux | grep ollama
 
 # Verify workspace structure
-ls -la ~/.openclaw/workspaces/
+ls -la ~/.openclaw/workspace-*/
 
 # Check agent environment
 pm2 env openclaw-devops
 
 # Remove stale locks (agents stopped)
-rm ~/.openclaw/workspaces/*/.memory.lock
+rm ~/.openclaw/workspace-*/.memory.lock
 
 # View agent logs
 pm2 logs openclaw-devops
@@ -83,7 +83,7 @@ pm2 logs openclaw-devops
 ## File Locations
 
 - **Skill**: `~/.openclaw/skills/local-semantic-memory/local-semantic-memory.py`
-- **Workspaces**: `~/.openclaw/workspaces/`
+- **Workspaces**: `~/.openclaw/workspace-<agent>/`
 - **PM2 Config**: `~/.openclaw/ecosystem.config.js`
 - **Setup Script**: `~/.openclaw/scripts/setup-multi-agent-workspaces.sh`
 - **Full Guide**: `~/.openclaw/MULTI_AGENT_MEMORY_SETUP.md`
