@@ -3,8 +3,8 @@
 ## Tier Configuration
 
 ### Tier 1: SIMPLE
-- **Provider**: Synthetic (Kimi K2.5)
-- **Cost**: Free via Synthetic API
+- **Provider**: OpenAI (GPT-4.1 Nano)
+- **Cost**: Ultra-low OpenAI pricing
 - **Triggers**: Short messages (<30 chars), greetings, simple Q&A keywords
 - **Example**: "Hello", "What is 2+2?", "Thanks"
 - **Note**: Switch to `ollama` + `mistral:latest` when GPU is available for truly free local inference
@@ -17,7 +17,7 @@
 - **Example**: "Explain how nginx reverse proxy works", "What are best practices for PostgreSQL indexing?"
 
 ### Tier 3: CODEX
-- **Provider**: OpenAI (GPT-5 Codex)
+- **Provider**: OpenAI (GPT-5.2 Codex)
 - **Cost**: Standard OpenAI pricing
 - **Triggers**: `/codex` in message, `model: "codex"`, 3+ code keywords, code + technical terms, code + long messages (>200 chars)
 - **Use cases**: Code generation, code review, heavy implementation tasks
@@ -173,9 +173,9 @@ You can include additional providers (e.g., `synthetic`) alongside `smart-router
 | Variable | Tiers | Description |
 |----------|-------|-------------|
 | `ANTHROPIC_API_KEY` | ONDEMAND | Anthropic API key for Claude Opus 4.6 |
-| `SYNTHETIC_API_KEY` | SIMPLE, REASONING | Synthetic API key for Kimi K2.5 |
+| `OPENAI_API_KEY` | SIMPLE, CODEX | OpenAI API key for GPT-4.1 Nano and GPT-5.2 Codex |
+| `SYNTHETIC_API_KEY` | REASONING | Synthetic API key for Kimi K2.5 |
 | `GOOGLE_API_KEY` | MEDIUM | Google AI API key for Gemini 2.5 Pro |
-| `OPENAI_API_KEY` | CODEX | OpenAI API key for GPT-5 Codex |
 
 ### Optional
 
