@@ -31,8 +31,9 @@
 ### Tier 5: ONDEMAND
 - **Provider**: Anthropic (Claude Opus 4.6)
 - **Cost**: $15.00 input / $75.00 output per 1M tokens
-- **Access**: Manual selection only — request with `model: "ondemand"`
+- **Access**: Request with `model: "ondemand"`, or include `/ondemand` in your message when using `auto`
 - **Use cases**: Highest quality output, critical tasks, creative excellence
+- **Example**: "/ondemand Write a production-ready OAuth2 implementation"
 
 ---
 
