@@ -1,0 +1,41 @@
+{
+  "name": "google-workspace-cli",
+  "version": "0.1.0",
+  "description": "Google Workspace CLI with multi-profile support for Gmail, Calendar, and Drive",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "gwcli": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/index.js",
+    "lint": "eslint src --ext .ts",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "google",
+    "gmail",
+    "calendar",
+    "drive",
+    "cli",
+    "workspace"
+  ],
+  "author": "Ian Hines",
+  "license": "MIT",
+  "dependencies": {
+    "commander": "^12.1.0",
+    "googleapis": "^144.0.0",
+    "open": "^10.1.0",
+    "chalk": "^5.3.0",
+    "cli-table3": "^0.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
