@@ -17,10 +17,9 @@ const UPSTREAM_TIMEOUT_MS = 300_000;
 
 // ─── Tier → Model mapping ───────────────────────────────────────────────────
 const TIER_MODELS = {
-  // NOTE: Switch SIMPLE to "ollama" + "mistral:latest" when GPU is available
-  SIMPLE:    { provider: "synthetic", model: "hf:moonshotai/Kimi-K2.5" },
+  SIMPLE:    { provider: "openai",    model: "gpt-4.1-nano" },
   MEDIUM:    { provider: "gemini",    model: "gemini-2.5-pro" },
-  CODEX:     { provider: "openai",    model: "gpt-5-codex" },
+  CODEX:     { provider: "openai",    model: "gpt-5.2-codex" },
   REASONING: { provider: "synthetic", model: "hf:moonshotai/Kimi-K2.5" },
   ONDEMAND:  { provider: "anthropic", model: "claude-opus-4-6" },
 };
@@ -278,33 +277,38 @@ async function callGemini(model, messages, maxTokens) {
 
 async function callOpenAI(model, messages, maxTokens) {
   const { systemPrompt, messages: prepared } = prepareAnthropicMessages(messages);
-
-  // Build input array for the Responses API
-  const input = [];
-  if (systemPrompt) {
-    input.push({ role: "developer", content: systemPrompt });
-  }
-  for (const msg of prepared) {
-    input.push({ role: msg.role === "assistant" ? "assistant" : "user", content: msg.content });
-  }
+  const useResponses = model.includes("codex");
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
 
   try {
-    const res = await fetch(`${OPENAI_BASE_URL}/responses`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${OPENAI_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model,
-        input,
-        max_output_tokens: maxTokens || 4096,
-      }),
-      signal: controller.signal,
-    });
+    let res;
+    if (useResponses) {
+      // Codex models require the /v1/responses endpoint
+      const input = [];
+      if (systemPrompt) input.push({ role: "developer", content: systemPrompt });
+      for (const msg of prepared) {
+        input.push({ role: msg.role === "assistant" ? "assistant" : "user", content: msg.content });
+      }
+      res = await fetch(`${OPENAI_BASE_URL}/responses`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${OPENAI_API_KEY}` },
+        body: JSON.stringify({ model, input, max_output_tokens: maxTokens || 4096 }),
+        signal: controller.signal,
+      });
+    } else {
+      // Standard models use /v1/chat/completions
+      const openaiMessages = [];
+      if (systemPrompt) openaiMessages.push({ role: "system", content: systemPrompt });
+      openaiMessages.push(...prepared);
+      res = await fetch(`${OPENAI_BASE_URL}/chat/completions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${OPENAI_API_KEY}` },
+        body: JSON.stringify({ model, messages: openaiMessages, max_tokens: maxTokens || 4096 }),
+        signal: controller.signal,
+      });
+    }
 
     if (!res.ok) {
       const errText = await res.text();
@@ -312,23 +316,22 @@ async function callOpenAI(model, messages, maxTokens) {
     }
 
     const data = await res.json();
-    // Responses API returns output as an array of items
-    let text = "";
-    if (data.output) {
-      for (const item of data.output) {
-        if (item.type === "message" && item.content) {
-          for (const block of item.content) {
-            if (block.type === "output_text") text += block.text;
+
+    if (useResponses) {
+      let text = "";
+      if (data.output) {
+        for (const item of data.output) {
+          if (item.type === "message" && item.content) {
+            for (const block of item.content) {
+              if (block.type === "output_text") text += block.text;
+            }
           }
         }
       }
+      return { content: text, promptTokens: data.usage?.input_tokens || 0, completionTokens: data.usage?.output_tokens || 0 };
+    } else {
+      return { content: data.choices?.[0]?.message?.content || "", promptTokens: data.usage?.prompt_tokens || 0, completionTokens: data.usage?.completion_tokens || 0 };
     }
-
-    return {
-      content: text,
-      promptTokens: data.usage?.input_tokens || 0,
-      completionTokens: data.usage?.output_tokens || 0,
-    };
   } finally {
     clearTimeout(timeout);
   }
