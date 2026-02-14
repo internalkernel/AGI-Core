@@ -1,0 +1,6 @@
+{
+  "slug": "wordpress",
+  "name": "WordPress",
+  "version": "1.0.0",
+  "description": "WordPress REST API CLI for agents. Manage posts, pages, media, taxonomies, Gravity Forms, Redirection, and SEOPress via Application Passwords."
+}
