@@ -1,0 +1,6 @@
+{
+  "slug": "wp-cli",
+  "name": "WP-CLI",
+  "version": "1.0.0",
+  "description": "WP-CLI remote wrapper for agents. Run any WP-CLI command on remote WordPress sites via SSH with convenience wrappers for plugins, cache, maintenance, and backups."
+}
