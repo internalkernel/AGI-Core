@@ -1,0 +1,6 @@
+{
+  "slug": "rss-reader",
+  "name": "RSS Reader",
+  "version": "1.0.0",
+  "description": "Subscribe to RSS/Atom feeds and fetch new items with deduplication. JSON output for agent consumption."
+}
