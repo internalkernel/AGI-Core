@@ -24,7 +24,7 @@ OpenClaw Agent → HTTP POST /v1/chat/completions → Smart Router (:9999)
 | SIMPLE | Synthetic | Kimi K2.5 | Short messages, greetings, simple Q&A |
 | MEDIUM | Gemini | gemini-2.5-pro | Technical keywords, moderate length, research |
 | COMPLEX | Synthetic | Kimi K2.5 | Heavy code content, long technical queries |
-| REASONING | Synthetic | Kimi K2-Thinking | Step-by-step, proofs, deep analysis |
+| REASONING | Synthetic | Kimi K2.5 | Step-by-step, proofs, deep analysis |
 | ONDEMAND | Anthropic | claude-opus-4-6 | Explicitly requested via `model: "ondemand"` |
 
 ## Quick Start
@@ -144,7 +144,7 @@ const TIER_MODELS = {
   SIMPLE:    { provider: "ollama",    model: "mistral:latest" },  // Use local when GPU available
   MEDIUM:    { provider: "gemini",    model: "gemini-2.5-pro" },
   COMPLEX:   { provider: "anthropic", model: "claude-sonnet-4-5-20250929" },
-  REASONING: { provider: "synthetic", model: "hf:moonshotai/Kimi-K2-Thinking" },
+  REASONING: { provider: "synthetic", model: "hf:moonshotai/Kimi-K2.5" },
   ONDEMAND:  { provider: "anthropic", model: "claude-opus-4-6" },
 };
 ```

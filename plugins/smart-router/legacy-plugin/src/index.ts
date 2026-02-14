@@ -104,7 +104,7 @@ export default function smartRouter(): OpenClawPlugin {
 
             return response;
           } catch (error) {
-            // Fallback to Opus 4.6 if K2-Thinking fails
+            // Fallback to Opus 4.6 if primary REASONING model fails
             if (decision.tier === "REASONING" && decision.fallbackModel) {
               console.log(
                 `⚠️  ${decision.recommendedModel} failed, falling back to ${decision.fallbackModel}`

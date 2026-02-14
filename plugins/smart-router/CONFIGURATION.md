@@ -23,7 +23,7 @@
 - **Example**: "Implement an async function that uses Redis for caching with a class-based architecture"
 
 ### Tier 4: REASONING
-- **Provider**: Synthetic (Kimi K2-Thinking)
+- **Provider**: Synthetic (Kimi K2.5)
 - **Cost**: Free via Synthetic API
 - **Triggers**: 2+ reasoning keywords (prove, theorem, step-by-step, analyze, evaluate, etc.)
 - **Example**: "Prove step-by-step that the square root of 2 is irrational using logic"
@@ -162,7 +162,7 @@ You can include additional providers (e.g., `synthetic`) alongside `smart-router
 | Variable | Tiers | Description |
 |----------|-------|-------------|
 | `ANTHROPIC_API_KEY` | ONDEMAND | Anthropic API key for Claude Opus 4.6 |
-| `SYNTHETIC_API_KEY` | SIMPLE, COMPLEX, REASONING | Synthetic API key for Kimi models |
+| `SYNTHETIC_API_KEY` | SIMPLE, COMPLEX, REASONING | Synthetic API key for Kimi K2.5 |
 | `GOOGLE_API_KEY` | MEDIUM | Google AI API key for Gemini 2.5 Pro |
 
 ### Optional

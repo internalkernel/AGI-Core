@@ -60,13 +60,6 @@ export const ModelRegistry = new Map<string, ModelConfig>([
     inputCost: 0.50,
     outputCost: 2.00,
   }],
-  ["synthetic/kimi-k2-thinking", {
-    provider: "synthetic",
-    model: "kimi-k2-thinking",
-    inputCost: 2.00,
-    outputCost: 8.00,
-  }],
-
   // Local Models
   ["local/mistral-7b", {
     provider: "local",
