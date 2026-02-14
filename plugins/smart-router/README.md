@@ -25,7 +25,7 @@ OpenClaw Agent → HTTP POST /v1/chat/completions → Smart Router (:9999)
 | MEDIUM | Gemini | gemini-2.5-pro | Technical keywords, moderate length, research |
 | COMPLEX | Synthetic | Kimi K2.5 | Heavy code content, long technical queries |
 | REASONING | Synthetic | Kimi K2.5 | Step-by-step, proofs, deep analysis |
-| ONDEMAND | Anthropic | claude-opus-4-6 | Explicitly requested via `model: "ondemand"` |
+| ONDEMAND | Anthropic | claude-opus-4-6 | `model: "ondemand"` or `/ondemand` in message |
 
 ## Quick Start
 
