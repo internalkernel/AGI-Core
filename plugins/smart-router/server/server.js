@@ -279,17 +279,20 @@ async function callGemini(model, messages, maxTokens) {
 async function callOpenAI(model, messages, maxTokens) {
   const { systemPrompt, messages: prepared } = prepareAnthropicMessages(messages);
 
-  const openaiMessages = [];
+  // Build input array for the Responses API
+  const input = [];
   if (systemPrompt) {
-    openaiMessages.push({ role: "system", content: systemPrompt });
+    input.push({ role: "developer", content: systemPrompt });
   }
-  openaiMessages.push(...prepared);
+  for (const msg of prepared) {
+    input.push({ role: msg.role === "assistant" ? "assistant" : "user", content: msg.content });
+  }
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
 
   try {
-    const res = await fetch(`${OPENAI_BASE_URL}/chat/completions`, {
+    const res = await fetch(`${OPENAI_BASE_URL}/responses`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -297,8 +300,8 @@ async function callOpenAI(model, messages, maxTokens) {
       },
       body: JSON.stringify({
         model,
-        messages: openaiMessages,
-        max_tokens: maxTokens || 4096,
+        input,
+        max_output_tokens: maxTokens || 4096,
       }),
       signal: controller.signal,
     });
@@ -309,12 +312,22 @@ async function callOpenAI(model, messages, maxTokens) {
     }
 
     const data = await res.json();
-    const text = data.choices?.[0]?.message?.content || "";
+    // Responses API returns output as an array of items
+    let text = "";
+    if (data.output) {
+      for (const item of data.output) {
+        if (item.type === "message" && item.content) {
+          for (const block of item.content) {
+            if (block.type === "output_text") text += block.text;
+          }
+        }
+      }
+    }
 
     return {
       content: text,
-      promptTokens: data.usage?.prompt_tokens || 0,
-      completionTokens: data.usage?.completion_tokens || 0,
+      promptTokens: data.usage?.input_tokens || 0,
+      completionTokens: data.usage?.output_tokens || 0,
     };
   } finally {
     clearTimeout(timeout);
