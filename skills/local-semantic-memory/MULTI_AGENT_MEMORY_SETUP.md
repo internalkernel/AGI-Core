@@ -14,6 +14,8 @@ The `local-semantic-memory` skill has been enhanced with:
 - **Deduplication** - SHA256 exact-match + near-duplicate vector detection prevents bloat
 - **Memory decay** - Confidence-based lifecycle management with pinning support
 - **LLM reranking** - Optional local model reranking via Ollama for precision
+- **Error correction** - Retract-and-replace with linked audit trail
+- **Lesson tracking** - Structured lesson-learned recording with mistake context
 
 ---
 
@@ -244,6 +246,61 @@ Memories are automatically "touched" (last_accessed updated) when returned as se
 
 ---
 
+## Error Correction & Lessons
+
+### Correcting Wrong Memories
+
+When an agent discovers a memory is incorrect, use `correct` to retract the original and replace it with a linked correction:
+
+```bash
+# Retract and replace
+uv run local-semantic-memory.py correct "The server runs on port 9999" \
+  --memory-id abc123def456 \
+  --reason "Port was changed from 8080 to 9999"
+```
+
+What happens:
+1. The original memory is marked as `retracted` (kept for audit trail)
+2. A new correction memory is created with `corrects_id` linking to the original
+3. The original gets a `replaced_by` field pointing to the correction
+4. Retracted memories are excluded from normal search results
+
+To view retracted memories alongside active ones:
+
+```bash
+uv run local-semantic-memory.py search "server port" --include-retracted
+```
+
+Search results show visual tags: `[RETRACTED]`, `[CORRECTION]`, along with the correction chain metadata (reason, corrects_id, replaced_by).
+
+### Recording Lessons Learned
+
+Use `lesson` to store structured insights from mistakes:
+
+```bash
+# Record a lesson with mistake context
+uv run local-semantic-memory.py --shared lesson \
+  "Always add new env vars to ecosystem.config.js when adding to .bashrc" \
+  --mistake "Added OPENAI_API_KEY to .bashrc but forgot ecosystem.config.js, PM2 passed undefined"
+
+# Simple lesson without mistake context
+uv run local-semantic-memory.py lesson "Validate API keys before deploying"
+```
+
+Lessons are stored with `[LESSON]` tags and the `--mistake` context is embedded in both the text (for search) and metadata (for display).
+
+### Stats
+
+The `stats` command tracks corrections and lessons:
+
+```
+   Retracted: 2
+   Corrections: 2
+   Lessons: 5
+```
+
+---
+
 ## Monitoring & Maintenance
 
 ### View Statistics
@@ -262,6 +319,9 @@ uv run local-semantic-memory.py stats
 #    Avg confidence: 0.95
 #    Decay eligible: 12
 #    Pinned: 3
+#    Retracted: 2
+#    Corrections: 2
+#    Lessons: 5
 #
 #    By Category:
 #      general: 45
@@ -501,6 +561,8 @@ uv run local-semantic-memory.py \
 - Intent-aware search routing
 - Deduplication (exact + near-duplicate)
 - Memory decay with confidence tracking
+- Error correction with retract-and-replace audit trail
+- Structured lesson-learned tracking
 
 ✅ **What's Automatic**:
 - Workspace detection from environment
@@ -510,6 +572,7 @@ uv run local-semantic-memory.py \
 - FTS5 backfill from existing ChromaDB data
 - Access tracking (touch on search)
 - Intent classification per query
+- Retracted memory exclusion from search results
 
 ✅ **What You Need**:
 - Ollama running with `nomic-embed-text` model
