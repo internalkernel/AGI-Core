@@ -11,6 +11,13 @@ const contentIndex = args.indexOf("--content");
 const fetchContent = contentIndex !== -1;
 if (fetchContent) args.splice(contentIndex, 1);
 
+let forcedEngine = null;
+const engineIndex = args.indexOf("--engine");
+if (engineIndex !== -1 && args[engineIndex + 1]) {
+	forcedEngine = args[engineIndex + 1].toLowerCase();
+	args.splice(engineIndex, 2);
+}
+
 let numResults = 5;
 const nIndex = args.indexOf("-n");
 if (nIndex !== -1 && args[nIndex + 1]) {
@@ -21,23 +28,83 @@ if (nIndex !== -1 && args[nIndex + 1]) {
 const query = args.join(" ");
 
 if (!query) {
-	console.log("Usage: search.js <query> [-n <num>] [--content]");
+	console.log("Usage: search.js <query> [-n <num>] [--content] [--engine tavily|brave]");
 	console.log("\nOptions:");
-	console.log("  -n <num>    Number of results (default: 5)");
-	console.log("  --content   Fetch readable content as markdown");
+	console.log("  -n <num>              Number of results (default: 5)");
+	console.log("  --content             Fetch readable content as markdown");
+	console.log("  --engine tavily|brave  Force a specific search engine (default: auto)");
 	console.log("\nExamples:");
 	console.log('  search.js "javascript async await"');
 	console.log('  search.js "rust programming" -n 10');
 	console.log('  search.js "climate change" --content');
+	console.log('  search.js "news today" --engine brave');
 	process.exit(1);
 }
 
-const apiKey = process.env.BRAVE_SEARCH_API_KEY;
-if (!apiKey) {
-	console.error("Error: BRAVE_SEARCH_API_KEY environment variable not set.");
-	console.error("Get an API key from https://brave.com/search/api/");
+const tavilyKey = process.env.TAVILY_API_KEY;
+const braveKey = process.env.BRAVE_SEARCH_API_KEY;
+
+function pickEngine() {
+	if (forcedEngine === "tavily") {
+		if (!tavilyKey) {
+			console.error("Error: --engine tavily requires TAVILY_API_KEY environment variable.");
+			process.exit(1);
+		}
+		return "tavily";
+	}
+	if (forcedEngine === "brave") {
+		if (!braveKey) {
+			console.error("Error: --engine brave requires BRAVE_SEARCH_API_KEY environment variable.");
+			process.exit(1);
+		}
+		return "brave";
+	}
+	if (tavilyKey) return "tavily";
+	if (braveKey) return "brave";
+	console.error("Error: No search API key found.");
+	console.error("Set TAVILY_API_KEY (primary) or BRAVE_SEARCH_API_KEY (fallback).");
 	process.exit(1);
 }
+
+// --- Tavily ---
+
+async function fetchTavilyResults(query, numResults, includeContent) {
+	const body = {
+		query,
+		max_results: Math.min(numResults, 20),
+		include_answer: "basic",
+	};
+	if (includeContent) {
+		body.include_raw_content = "markdown";
+	}
+
+	const response = await fetch("https://api.tavily.com/search", {
+		method: "POST",
+		headers: {
+			"Content-Type": "application/json",
+			"Authorization": `Bearer ${tavilyKey}`,
+		},
+		body: JSON.stringify(body),
+	});
+
+	if (!response.ok) {
+		const text = await response.text();
+		throw new Error(`Tavily API error ${response.status}: ${text}`);
+	}
+
+	const data = await response.json();
+	const answer = data.answer || null;
+	const results = (data.results || []).slice(0, numResults).map((r) => ({
+		title: r.title || "",
+		link: r.url || "",
+		snippet: r.content || "",
+		content: includeContent ? (r.raw_content || "").substring(0, 5000) : undefined,
+	}));
+
+	return { answer, results };
+}
+
+// --- Brave ---
 
 async function fetchBraveResults(query, numResults) {
 	const params = new URLSearchParams({
@@ -51,7 +118,7 @@ async function fetchBraveResults(query, numResults) {
 			headers: {
 				"Accept": "application/json",
 				"Accept-Encoding": "gzip",
-				"X-Subscription-Token": apiKey,
+				"X-Subscription-Token": braveKey,
 			},
 		}
 	);
@@ -64,12 +131,17 @@ async function fetchBraveResults(query, numResults) {
 	const data = await response.json();
 	const webResults = data.web?.results || [];
 
-	return webResults.slice(0, numResults).map((r) => ({
-		title: r.title || "",
-		link: r.url || "",
-		snippet: r.description || "",
-	}));
+	return {
+		answer: null,
+		results: webResults.slice(0, numResults).map((r) => ({
+			title: r.title || "",
+			link: r.url || "",
+			snippet: r.description || "",
+		})),
+	};
 }
+
+// --- Content extraction (for Brave --content) ---
 
 function htmlToMarkdown(html) {
 	const turndown = new TurndownService({ headingStyle: "atx", codeBlockStyle: "fenced" });
@@ -97,52 +169,62 @@ async function fetchPageContent(url) {
 			},
 			signal: AbortSignal.timeout(10000),
 		});
-		
+
 		if (!response.ok) {
 			return `(HTTP ${response.status})`;
 		}
-		
+
 		const html = await response.text();
 		const dom = new JSDOM(html, { url });
 		const reader = new Readability(dom.window.document);
 		const article = reader.parse();
-		
+
 		if (article && article.content) {
 			return htmlToMarkdown(article.content).substring(0, 5000);
 		}
-		
-		// Fallback: try to get main content
+
 		const fallbackDoc = new JSDOM(html, { url });
 		const body = fallbackDoc.window.document;
 		body.querySelectorAll("script, style, noscript, nav, header, footer, aside").forEach(el => el.remove());
 		const main = body.querySelector("main, article, [role='main'], .content, #content") || body.body;
 		const text = main?.textContent || "";
-		
+
 		if (text.trim().length > 100) {
 			return text.trim().substring(0, 5000);
 		}
-		
+
 		return "(Could not extract content)";
 	} catch (e) {
 		return `(Error: ${e.message})`;
 	}
 }
 
-// Main
+// --- Main ---
+
 try {
-	const results = await fetchBraveResults(query, numResults);
-	
+	const engine = pickEngine();
+	let answer, results;
+
+	if (engine === "tavily") {
+		({ answer, results } = await fetchTavilyResults(query, numResults, fetchContent));
+	} else {
+		({ answer, results } = await fetchBraveResults(query, numResults));
+		if (fetchContent) {
+			for (const result of results) {
+				result.content = await fetchPageContent(result.link);
+			}
+		}
+	}
+
 	if (results.length === 0) {
 		console.error("No results found.");
 		process.exit(0);
 	}
-	
-	if (fetchContent) {
-		for (const result of results) {
-			result.content = await fetchPageContent(result.link);
-		}
+
+	if (answer) {
+		console.log(`Answer: ${answer}\n`);
 	}
-	
+
 	for (let i = 0; i < results.length; i++) {
 		const r = results[i];
 		console.log(`--- Result ${i + 1} ---`);
