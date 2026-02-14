@@ -9,6 +9,11 @@ The `local-semantic-memory` skill has been enhanced with:
 - **Concurrent access protection** - File locks prevent conflicts between agents
 - **Workspace validation** - Security checks ensure safe workspace locations
 - **Isolated & shared memory** - Agents can have private memories or share knowledge
+- **Hybrid search** - Vector + FTS5 keyword search with RRF fusion for better retrieval
+- **Intent-aware routing** - Automatically adjusts search weights based on query type
+- **Deduplication** - SHA256 exact-match + near-duplicate vector detection prevents bloat
+- **Memory decay** - Confidence-based lifecycle management with pinning support
+- **LLM reranking** - Optional local model reranking via Ollama for precision
 
 ---
 
@@ -25,6 +30,8 @@ This creates:
 - Shared memory workspace
 - Required subdirectories (memory/, vector_db/, logs/, cache/)
 - README files in each workspace
+
+On first run after upgrade, the FTS5 index (`memory.db`) is automatically created and backfilled from existing ChromaDB data.
 
 ### 2. Install Prerequisites
 
@@ -56,6 +63,7 @@ After setup, you'll have:
 ├── workspace-content-specialist/
 │   ├── memory/           # Daily logs
 │   ├── vector_db/        # ChromaDB database
+│   ├── memory.db         # FTS5 keyword index + hash table
 │   ├── logs/             # Agent logs
 │   ├── cache/            # Temp files
 │   ├── .memory.lock      # Concurrency lock (auto-created)
@@ -171,6 +179,71 @@ uv run local-semantic-memory.py consolidate --days 7
 
 ---
 
+## Hybrid Search
+
+Search now combines vector similarity (ChromaDB) with keyword matching (FTS5) using Reciprocal Rank Fusion:
+
+```bash
+# Basic hybrid search
+uv run local-semantic-memory.py search "Friday meeting"
+
+# Show detected intent and weight balance
+uv run local-semantic-memory.py search "who is my doctor?" --show-intent
+
+# With LLM reranking (requires an Ollama chat model)
+uv run local-semantic-memory.py search "meeting schedule" --rerank
+uv run local-semantic-memory.py search "meeting schedule" --rerank --rerank-model qwen2.5
+```
+
+Intent types adjust the vector/keyword balance automatically:
+- **WHO** queries (people, roles) → balanced 50/50
+- **WHEN** queries (dates, times) → keyword boost 40/60
+- **WHERE** queries (locations) → balanced 50/50
+- **PREFERENCE** queries (likes, wants) → vector boost 80/20
+- **DEFAULT** → slight vector preference 70/30
+
+---
+
+## Deduplication
+
+Duplicate detection prevents memory bloat:
+
+```bash
+# Will be rejected if exact duplicate exists
+uv run local-semantic-memory.py add "User prefers dark mode"
+uv run local-semantic-memory.py add "User prefers dark mode"  # ⚠️ rejected
+
+# Force add to bypass dedup
+uv run local-semantic-memory.py add "User prefers dark mode" --force
+
+# Near-duplicates (>= 0.95 similarity) are also blocked
+# Near-matches (0.88-0.95) warn but allow
+```
+
+---
+
+## Memory Decay
+
+Stale memories lose confidence over time. Pinned memories are protected:
+
+```bash
+# Preview what would happen
+uv run local-semantic-memory.py decay --dry-run
+
+# Run decay (default: 30 days, threshold 0.15)
+uv run local-semantic-memory.py decay
+
+# Custom settings
+uv run local-semantic-memory.py decay --age-days 7 --threshold 0.20
+
+# Check decay-related stats
+uv run local-semantic-memory.py stats  # shows avg_confidence, decay_eligible, pinned
+```
+
+Memories are automatically "touched" (last_accessed updated) when returned as search results, keeping active memories alive.
+
+---
+
 ## Monitoring & Maintenance
 
 ### View Statistics
@@ -183,7 +256,12 @@ uv run local-semantic-memory.py stats
 # 📊 Memory Statistics
 #    Current workspace: workspace-devops
 #    Current agent: devops
+#    Shared memory: False
 #    Total memories: 127
+#    FTS5 indexed: 127
+#    Avg confidence: 0.95
+#    Decay eligible: 12
+#    Pinned: 3
 #
 #    By Category:
 #      general: 45
@@ -419,17 +497,25 @@ uv run local-semantic-memory.py \
 - PM2 environment variables for agent identification
 - Concurrent access protection
 - Workspace validation
+- Hybrid vector + FTS5 search with RRF fusion
+- Intent-aware search routing
+- Deduplication (exact + near-duplicate)
+- Memory decay with confidence tracking
 
 ✅ **What's Automatic**:
 - Workspace detection from environment
 - Agent ID tracking in metadata
 - Lock acquisition and retry logic
 - Memory isolation per agent
+- FTS5 backfill from existing ChromaDB data
+- Access tracking (touch on search)
+- Intent classification per query
 
 ✅ **What You Need**:
 - Ollama running with `nomic-embed-text` model
 - PM2 agents restarted with new config
 - Workspaces initialized (via setup script)
+- (Optional) An Ollama chat model for `--rerank` (e.g., qwen2.5, llama3.2)
 
 ---
 
