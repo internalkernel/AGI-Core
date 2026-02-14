@@ -38,6 +38,15 @@ uv run ~/.openclaw/skills/local-semantic-memory/local-semantic-memory.py consoli
 # Decay stale memories
 uv run local-semantic-memory.py decay --dry-run
 uv run local-semantic-memory.py decay --age-days 30 --threshold 0.15
+
+# Correct a wrong memory
+uv run local-semantic-memory.py correct "Corrected info" --memory-id <id> --reason "Was outdated"
+
+# Record a lesson learned
+uv run local-semantic-memory.py lesson "Always do X" --mistake "Did Y instead"
+
+# Search excluding retracted (default) or including them
+uv run local-semantic-memory.py search "query" --include-retracted
 ```
 
 ## Agent-Specific Commands
@@ -67,6 +76,10 @@ uv run local-semantic-memory.py add "text" --force
 | `--dry-run` | decay | Preview decay without changes |
 | `--threshold` | decay | Confidence threshold for deletion (default: 0.15) |
 | `--age-days` | decay | Days since last access (default: 30) |
+| `--memory-id` | correct | ID of the memory to retract and replace |
+| `--reason` | correct | Explanation of what was wrong |
+| `--mistake` | lesson | What went wrong (context for the lesson) |
+| `--include-retracted` | search | Show retracted memories in results |
 
 ## Environment Variables
 
