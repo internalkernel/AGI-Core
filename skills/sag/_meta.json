@@ -1,0 +1,7 @@
+{
+  "slug": "sag",
+  "name": "SAG - ElevenLabs TTS",
+  "version": "0.2.2",
+  "description": "High-quality text-to-speech using ElevenLabs API via the sag CLI",
+  "upstream": "https://github.com/steipete/sag"
+}
