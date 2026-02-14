@@ -59,6 +59,7 @@ function classify(query) {
   const simpleHits = PATTERNS.simple.filter(p => q.includes(p)).length;
   const technicalHits = PATTERNS.technical.filter(p => q.includes(p)).length;
 
+  if (q.includes("/ondemand")) return "ONDEMAND";
   if (reasoningHits >= 2) return "REASONING";
   if (len < 80 && simpleHits > 0 && codeHits === 0 && technicalHits === 0) return "SIMPLE";
   if (len < 30) return "SIMPLE";
