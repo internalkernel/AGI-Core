@@ -50,9 +50,9 @@ export const ModelRegistry = new Map([
             inputCost: 0.50,
             outputCost: 2.00,
         }],
-    ["synthetic/kimi-k2-thinking", {
+    ["synthetic/kimi-2.5", {
             provider: "synthetic",
-            model: "kimi-k2-thinking",
+            model: "kimi-2.5",
             inputCost: 2.00,
             outputCost: 8.00,
         }],

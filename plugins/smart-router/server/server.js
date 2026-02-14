@@ -19,7 +19,7 @@ const TIER_MODELS = {
   SIMPLE:    { provider: "synthetic", model: "hf:moonshotai/Kimi-K2.5" },
   MEDIUM:    { provider: "gemini",    model: "gemini-2.5-pro" },
   COMPLEX:   { provider: "synthetic", model: "hf:moonshotai/Kimi-K2.5" },
-  REASONING: { provider: "synthetic", model: "hf:moonshotai/Kimi-K2-Thinking" },
+  REASONING: { provider: "synthetic", model: "hf:moonshotai/Kimi-K2.5" },
   ONDEMAND:  { provider: "anthropic", model: "claude-opus-4-6" },
 };
 

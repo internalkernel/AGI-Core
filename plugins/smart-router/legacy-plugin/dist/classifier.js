@@ -177,7 +177,7 @@ function getModelForTier(tier) {
         SIMPLE: "local/mistral-7b",
         MEDIUM: "synthetic/kimi-2.5",
         COMPLEX: "anthropic/claude-sonnet-4.5",
-        REASONING: "synthetic/kimi-k2-thinking",
+        REASONING: "synthetic/kimi-2.5",
         ONDEMAND: "anthropic/claude-opus-4.6",
     };
     return tierModels[tier];
