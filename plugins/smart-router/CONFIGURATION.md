@@ -16,11 +16,12 @@
 - **Use cases**: Research, local search optimization, general technical queries
 - **Example**: "Explain how nginx reverse proxy works", "What are best practices for PostgreSQL indexing?"
 
-### Tier 3: COMPLEX
-- **Provider**: Synthetic (Kimi K2.5)
-- **Cost**: Free via Synthetic API
-- **Triggers**: 3+ code keywords, code + technical terms, code + long messages (>200 chars)
-- **Example**: "Implement an async function that uses Redis for caching with a class-based architecture"
+### Tier 3: CODEX
+- **Provider**: OpenAI (GPT-5 Codex)
+- **Cost**: Standard OpenAI pricing
+- **Triggers**: `/codex` in message, `model: "codex"`, 3+ code keywords, code + technical terms, code + long messages (>200 chars)
+- **Use cases**: Code generation, code review, heavy implementation tasks
+- **Example**: "/codex Implement an async function that uses Redis for caching with a class-based architecture"
 
 ### Tier 4: REASONING
 - **Provider**: Synthetic (Kimi K2.5)
@@ -62,7 +63,7 @@ Each agent needs configuration in **two locations**: the profile directory and t
 The `smart-router` provider must be defined with:
 - `baseUrl` pointing to the smart-router server
 - `api` set to `openai-completions`
-- Two models: `auto` (intelligent routing) and `ondemand` (direct Opus access)
+- Three models: `auto` (intelligent routing), `ondemand` (direct Opus access), and `codex` (direct GPT-5 Codex access)
 
 ```json
 {
@@ -83,6 +84,15 @@ The `smart-router` provider must be defined with:
         {
           "id": "ondemand",
           "name": "Smart Router (On-Demand)",
+          "reasoning": false,
+          "input": ["text"],
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+          "contextWindow": 256000,
+          "maxTokens": 8192
+        },
+        {
+          "id": "codex",
+          "name": "Smart Router (Codex)",
           "reasoning": false,
           "input": ["text"],
           "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
@@ -163,8 +173,9 @@ You can include additional providers (e.g., `synthetic`) alongside `smart-router
 | Variable | Tiers | Description |
 |----------|-------|-------------|
 | `ANTHROPIC_API_KEY` | ONDEMAND | Anthropic API key for Claude Opus 4.6 |
-| `SYNTHETIC_API_KEY` | SIMPLE, COMPLEX, REASONING | Synthetic API key for Kimi K2.5 |
+| `SYNTHETIC_API_KEY` | SIMPLE, REASONING | Synthetic API key for Kimi K2.5 |
 | `GOOGLE_API_KEY` | MEDIUM | Google AI API key for Gemini 2.5 Pro |
+| `OPENAI_API_KEY` | CODEX | OpenAI API key for GPT-5 Codex |
 
 ### Optional
 
@@ -218,6 +229,11 @@ curl -s http://127.0.0.1:9999/v1/chat/completions \
 curl -s http://127.0.0.1:9999/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{"model":"auto","stream":true,"messages":[{"role":"user","content":"What are the best practices for configuring nginx as a reverse proxy?"}]}'
+
+# CODEX tier (trigger phrase)
+curl -s http://127.0.0.1:9999/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"auto","stream":true,"messages":[{"role":"user","content":"/codex Write a binary search in Python"}]}'
 
 # ONDEMAND tier (manual override)
 curl -s http://127.0.0.1:9999/v1/chat/completions \

@@ -23,7 +23,7 @@ OpenClaw Agent → HTTP POST /v1/chat/completions → Smart Router (:9999)
 |------|----------|-------|----------|
 | SIMPLE | Synthetic | Kimi K2.5 | Short messages, greetings, simple Q&A |
 | MEDIUM | Gemini | gemini-2.5-pro | Technical keywords, moderate length, research |
-| COMPLEX | Synthetic | Kimi K2.5 | Heavy code content, long technical queries |
+| CODEX | OpenAI | gpt-5-codex | Heavy code content, `/codex` trigger, or `model: "codex"` |
 | REASONING | Synthetic | Kimi K2.5 | Step-by-step, proofs, deep analysis |
 | ONDEMAND | Anthropic | claude-opus-4-6 | `model: "ondemand"` or `/ondemand` in message |
 
@@ -131,7 +131,8 @@ Some models (notably Kimi) emit raw tool-call markup tokens (`<|tool_calls_secti
 |----------|----------|-------------|
 | `ROUTER_PORT` | No | Server port (default: 9999) |
 | `ANTHROPIC_API_KEY` | For ONDEMAND tier | Anthropic API key |
-| `SYNTHETIC_API_KEY` | For SIMPLE/COMPLEX/REASONING | Synthetic API key |
+| `SYNTHETIC_API_KEY` | For SIMPLE/REASONING | Synthetic API key |
+| `OPENAI_API_KEY` | For CODEX tier | OpenAI API key |
 | `GOOGLE_API_KEY` | For MEDIUM tier | Google AI API key (Gemini) |
 | `OLLAMA_URL` | For local models | Ollama endpoint (default: http://localhost:11434) |
 
@@ -144,6 +145,7 @@ const TIER_MODELS = {
   SIMPLE:    { provider: "ollama",    model: "mistral:latest" },  // Use local when GPU available
   MEDIUM:    { provider: "gemini",    model: "gemini-2.5-pro" },
   COMPLEX:   { provider: "anthropic", model: "claude-sonnet-4-5-20250929" },
+  CODEX:     { provider: "openai",    model: "gpt-5-codex" },
   REASONING: { provider: "synthetic", model: "hf:moonshotai/Kimi-K2.5" },
   ONDEMAND:  { provider: "anthropic", model: "claude-opus-4-6" },
 };

@@ -7,6 +7,8 @@ const OLLAMA_URL = process.env.OLLAMA_URL || "http://localhost:11434";
 const SYNTHETIC_API_KEY = process.env.SYNTHETIC_API_KEY;
 const SYNTHETIC_BASE_URL = "https://api.synthetic.new/anthropic";
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const OPENAI_BASE_URL = "https://api.openai.com/v1";
 const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY;
 const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai";
 
@@ -18,7 +20,7 @@ const TIER_MODELS = {
   // NOTE: Switch SIMPLE to "ollama" + "mistral:latest" when GPU is available
   SIMPLE:    { provider: "synthetic", model: "hf:moonshotai/Kimi-K2.5" },
   MEDIUM:    { provider: "gemini",    model: "gemini-2.5-pro" },
-  COMPLEX:   { provider: "synthetic", model: "hf:moonshotai/Kimi-K2.5" },
+  CODEX:     { provider: "openai",    model: "gpt-5-codex" },
   REASONING: { provider: "synthetic", model: "hf:moonshotai/Kimi-K2.5" },
   ONDEMAND:  { provider: "anthropic", model: "claude-opus-4-6" },
 };
@@ -60,11 +62,12 @@ function classify(query) {
   const technicalHits = PATTERNS.technical.filter(p => q.includes(p)).length;
 
   if (q.includes("/ondemand")) return "ONDEMAND";
+  if (q.includes("/codex")) return "CODEX";
   if (reasoningHits >= 2) return "REASONING";
   if (len < 80 && simpleHits > 0 && codeHits === 0 && technicalHits === 0) return "SIMPLE";
   if (len < 30) return "SIMPLE";
-  if (codeHits >= 3 || (codeHits >= 2 && technicalHits >= 1)) return "COMPLEX";
-  if (codeHits >= 1 && len > 200) return "COMPLEX";
+  if (codeHits >= 3 || (codeHits >= 2 && technicalHits >= 1)) return "CODEX";
+  if (codeHits >= 1 && len > 200) return "CODEX";
   if (technicalHits >= 1 || codeHits >= 1 || len > 150) return "MEDIUM";
 
   return "SIMPLE";
@@ -273,6 +276,51 @@ async function callGemini(model, messages, maxTokens) {
   }
 }
 
+async function callOpenAI(model, messages, maxTokens) {
+  const { systemPrompt, messages: prepared } = prepareAnthropicMessages(messages);
+
+  const openaiMessages = [];
+  if (systemPrompt) {
+    openaiMessages.push({ role: "system", content: systemPrompt });
+  }
+  openaiMessages.push(...prepared);
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
+
+  try {
+    const res = await fetch(`${OPENAI_BASE_URL}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages: openaiMessages,
+        max_tokens: maxTokens || 4096,
+      }),
+      signal: controller.signal,
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`OpenAI HTTP ${res.status}: ${errText}`);
+    }
+
+    const data = await res.json();
+    const text = data.choices?.[0]?.message?.content || "";
+
+    return {
+      content: text,
+      promptTokens: data.usage?.prompt_tokens || 0,
+      completionTokens: data.usage?.completion_tokens || 0,
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function dispatch(tier, messages, maxTokens) {
   const target = TIER_MODELS[tier];
   if (!target) throw new Error(`Unknown tier: ${tier}`);
@@ -284,6 +332,8 @@ async function dispatch(tier, messages, maxTokens) {
       return await callSynthetic(target.model, messages, maxTokens);
     case "gemini":
       return await callGemini(target.model, messages, maxTokens);
+    case "openai":
+      return await callOpenAI(target.model, messages, maxTokens);
     case "anthropic":
       return await callAnthropic(target.model, messages, maxTokens);
     default:
@@ -330,6 +380,7 @@ const server = http.createServer(async (req, res) => {
       object: "list",
       data: [
         { id: "auto", object: "model", owned_by: "smart-router" },
+        { id: "codex", object: "model", owned_by: "smart-router" },
         { id: "ondemand", object: "model", owned_by: "smart-router" },
       ],
     }));
@@ -352,6 +403,8 @@ const server = http.createServer(async (req, res) => {
       let tier;
       if (requestedModel === "ondemand") {
         tier = "ONDEMAND";
+      } else if (requestedModel === "codex") {
+        tier = "CODEX";
       } else {
         tier = classify(query);
       }
