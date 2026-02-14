@@ -23,6 +23,8 @@ Supports both isolated (per-agent) and shared (cross-agent) memory with:
 - Deduplication (exact hash + near-duplicate detection)
 - Memory decay with confidence tracking
 - Optional LLM reranking via Ollama
+- Error correction with retract-and-replace audit trail
+- Structured lesson-learned recording
 
 Usage:
     # Auto-detect workspace from environment
@@ -809,7 +811,8 @@ class LocalSemanticMemory:
         category: Optional[str] = None,
         show_intent: bool = False,
         rerank: bool = False,
-        rerank_model: Optional[str] = None
+        rerank_model: Optional[str] = None,
+        include_retracted: bool = False
     ) -> List[Dict[str, Any]]:
         """Search memories by hybrid vector + FTS5 similarity with RRF fusion."""
 
@@ -818,8 +821,8 @@ class LocalSemanticMemory:
         if show_intent:
             print(f"  Intent: {intent_name} (vector={vector_weight}, fts={fts_weight})")
 
-        # Oversample 2x from each source for better fusion
-        oversample = n_results * 2
+        # Oversample 2x from each source for better fusion (extra buffer for retracted filtering)
+        oversample = n_results * (2 if include_retracted else 3)
 
         # Generate query embedding
         query_embedding = self._generate_embedding(query)
@@ -857,6 +860,22 @@ class LocalSemanticMemory:
             for m in memories:
                 m['rrf_score'] = round(1.0 / (60 + vector_results.index(m)), 6)
 
+        # Filter out retracted memories unless explicitly requested
+        if not include_retracted:
+            before = len(memories)
+            memories = [m for m in memories if not self._is_retracted(m)]
+            filtered = before - len(memories)
+            if filtered:
+                print(f"  (Excluded {filtered} retracted memor{'y' if filtered == 1 else 'ies'}. Use --include-retracted to show.)")
+        else:
+            # Mark retracted entries visually
+            for m in memories:
+                if self._is_retracted(m):
+                    m['retracted'] = True
+
+        # Trim to requested count after filtering
+        memories = memories[:n_results]
+
         # Phase 5: Optional LLM reranking
         if rerank and memories:
             memories = self._llm_rerank(query, memories, model=rerank_model)
@@ -870,6 +889,14 @@ class LocalSemanticMemory:
             m['confidence'] = m.get('metadata', {}).get('confidence', 1.0)
 
         return memories
+
+    def _is_retracted(self, memory: Dict[str, Any]) -> bool:
+        """Check if a memory has been retracted."""
+        meta = memory.get('metadata', {})
+        retracted = meta.get('retracted', False)
+        if isinstance(retracted, str):
+            return retracted.lower() == 'true'
+        return bool(retracted)
 
     def consolidate(self, days: int = 1):
         """Consolidate recent daily logs into semantic memory with concurrent access protection"""
@@ -956,6 +983,9 @@ class LocalSemanticMemory:
             total_confidence = 0.0
             decay_eligible = 0
             pinned_count = 0
+            retracted_count = 0
+            corrections_count = 0
+            lessons_count = 0
             cutoff_30d = (datetime.now() - timedelta(days=30)).isoformat()
 
             for meta in all_data['metadatas']:
@@ -980,6 +1010,21 @@ class LocalSemanticMemory:
                 if pinned:
                     pinned_count += 1
 
+                retracted = meta.get('retracted', False)
+                if isinstance(retracted, str):
+                    retracted = retracted.lower() == 'true'
+                if retracted:
+                    retracted_count += 1
+
+                if meta.get('corrects_id'):
+                    corrections_count += 1
+                if meta.get('is_lesson'):
+                    is_lesson = meta['is_lesson']
+                    if isinstance(is_lesson, str):
+                        is_lesson = is_lesson.lower() == 'true'
+                    if is_lesson:
+                        lessons_count += 1
+
                 last_accessed = meta.get('last_accessed', meta.get('timestamp', ''))
                 if not pinned and last_accessed and last_accessed < cutoff_30d:
                     decay_eligible += 1
@@ -992,6 +1037,9 @@ class LocalSemanticMemory:
             avg_confidence = 0
             decay_eligible = 0
             pinned_count = 0
+            retracted_count = 0
+            corrections_count = 0
+            lessons_count = 0
 
         # FTS5 count
         fts_count = 0
@@ -1012,12 +1060,109 @@ class LocalSemanticMemory:
             "avg_confidence": avg_confidence,
             "decay_eligible": decay_eligible,
             "pinned": pinned_count,
+            "retracted": retracted_count,
+            "corrections": corrections_count,
+            "lessons": lessons_count,
             "current_workspace": str(self.workspace_path.name),
             "current_agent": self.agent_id,
             "vector_db_path": str(self.vector_db_path),
             "fts_db_path": str(self.fts_db_path),
             "is_shared": self.workspace_path.name == "shared"
         }
+
+    def correct(self, memory_id: str, corrected_text: str, reason: str = "") -> str:
+        """
+        Retract an incorrect memory and replace it with a correction.
+
+        The original memory is kept but marked as retracted (excluded from
+        normal search). A new correction memory is created linking back to
+        the original, preserving the audit trail.
+
+        Args:
+            memory_id: ID of the incorrect memory to retract.
+            corrected_text: The corrected information.
+            reason: Optional explanation of what was wrong.
+
+        Returns:
+            ID of the new correction memory.
+        """
+        # Fetch the original memory
+        try:
+            original = self.collection.get(ids=[memory_id])
+        except Exception as e:
+            print(f"❌ Could not fetch memory {memory_id}: {e}")
+            sys.exit(1)
+
+        if not original['ids']:
+            print(f"❌ Memory not found: {memory_id}")
+            sys.exit(1)
+
+        original_text = original['documents'][0]
+        original_meta = dict(original['metadatas'][0])
+        original_category = original_meta.get('category', 'general')
+
+        # Mark the original as retracted
+        now = datetime.now().isoformat()
+        original_meta['retracted'] = True
+        original_meta['retracted_at'] = now
+        original_meta['retracted_by_agent'] = self.agent_id
+        if reason:
+            original_meta['retraction_reason'] = reason
+
+        # Add the correction memory first (so we have its ID for the link)
+        correction_meta = {
+            "corrects_id": memory_id,
+            "original_text": original_text[:500],
+        }
+        if reason:
+            correction_meta["correction_reason"] = reason
+
+        correction_id = self.add(
+            corrected_text,
+            category=original_category,
+            metadata=correction_meta,
+            force=True  # bypass dedup — correction may be similar to original
+        )
+
+        # Now update the original with the retraction + link to correction
+        original_meta['replaced_by'] = correction_id
+        with self.lock:
+            self.collection.update(ids=[memory_id], metadatas=[original_meta])
+
+        print(f"\n✓ Correction applied:")
+        print(f"  Retracted: {original_text[:60]}... ({memory_id})")
+        print(f"  Replaced with: {corrected_text[:60]}... ({correction_id})")
+        if reason:
+            print(f"  Reason: {reason}")
+
+        return correction_id
+
+    def lesson(self, text: str, mistake: str = "", category: str = "lesson") -> str:
+        """
+        Record a structured lesson learned.
+
+        Args:
+            text: The lesson / correct approach.
+            mistake: What went wrong (optional context).
+            category: Category for the memory (default: "lesson").
+
+        Returns:
+            ID of the lesson memory.
+        """
+        # Build structured text that embeds both the lesson and mistake context
+        if mistake:
+            structured = f"LESSON: {text} | MISTAKE: {mistake}"
+        else:
+            structured = f"LESSON: {text}"
+
+        meta = {"is_lesson": True}
+        if mistake:
+            meta["mistake"] = mistake
+
+        lesson_id = self.add(structured, category=category, metadata=meta, force=True)
+        if mistake:
+            print(f"  Mistake: {mistake[:80]}")
+        return lesson_id
 
     def delete(self, memory_id: str):
         """Delete a specific memory from ChromaDB and FTS5"""
@@ -1062,6 +1207,15 @@ Examples:
   # Decay stale memories
   uv run local-semantic-memory.py decay --dry-run --age-days 30
 
+  # Correct a wrong memory
+  uv run local-semantic-memory.py correct "The correct info" --memory-id abc123 --reason "Was outdated"
+
+  # Record a lesson learned
+  uv run local-semantic-memory.py lesson "Always validate input before DB insert" --mistake "Stored raw user input"
+
+  # Search including retracted memories
+  uv run local-semantic-memory.py search "some query" --include-retracted
+
   # Consolidate logs
   uv run local-semantic-memory.py consolidate
 
@@ -1081,7 +1235,7 @@ Examples:
     )
     parser.add_argument(
         'command',
-        choices=['add', 'search', 'consolidate', 'stats', 'delete', 'clear', 'decay'],
+        choices=['add', 'search', 'consolidate', 'stats', 'delete', 'clear', 'decay', 'correct', 'lesson'],
         help='Command to execute'
     )
     parser.add_argument(
@@ -1152,6 +1306,27 @@ Examples:
         default=None,
         help='Ollama model for reranking (auto-detected if not set)'
     )
+    # Correction / lesson
+    parser.add_argument(
+        '--memory-id',
+        default=None,
+        help='Memory ID to correct (used with correct command)'
+    )
+    parser.add_argument(
+        '--reason',
+        default='',
+        help='Explanation of what was wrong (used with correct/lesson commands)'
+    )
+    parser.add_argument(
+        '--mistake',
+        default='',
+        help='What went wrong (used with lesson command)'
+    )
+    parser.add_argument(
+        '--include-retracted',
+        action='store_true',
+        help='Include retracted memories in search results'
+    )
 
     args = parser.parse_args()
 
@@ -1182,7 +1357,8 @@ Examples:
             category=args.category if args.category != 'general' else None,
             show_intent=args.show_intent,
             rerank=args.rerank,
-            rerank_model=args.rerank_model
+            rerank_model=args.rerank_model,
+            include_retracted=args.include_retracted
         )
 
         if args.json:
@@ -1192,18 +1368,37 @@ Examples:
             print(f"   Found {len(results)} relevant memories\n")
 
             for i, result in enumerate(results, 1):
+                meta = result['metadata']
+                # Visual indicators for special memory types
+                prefix = ""
+                if result.get('retracted') or meta.get('retracted'):
+                    prefix = "[RETRACTED] "
+                elif meta.get('corrects_id'):
+                    prefix = "[CORRECTION] "
+                elif meta.get('is_lesson'):
+                    prefix = "[LESSON] "
+
                 print(f"--- Result {i} of {len(results)} ---")
-                print(f"Text: {result['text']}")
-                print(f"Category: {result['metadata']['category']}")
-                print(f"Workspace: {result['metadata'].get('workspace', 'unknown')}")
-                print(f"Agent: {result['metadata'].get('agent_id', 'unknown')}")
+                print(f"Text: {prefix}{result['text']}")
+                print(f"Category: {meta['category']}")
+                print(f"Workspace: {meta.get('workspace', 'unknown')}")
+                print(f"Agent: {meta.get('agent_id', 'unknown')}")
                 print(f"Similarity: {1 - result['distance']:.3f}")
                 print(f"Confidence: {result.get('confidence', 'N/A')}")
                 if 'rrf_score' in result:
                     print(f"RRF Score: {result['rrf_score']}")
                 if 'rerank_score' in result:
                     print(f"Rerank Score: {result['rerank_score']} (LLM rating: {result.get('llm_rating', '?')})")
-                print(f"Timestamp: {result['metadata']['timestamp']}")
+                print(f"Timestamp: {meta['timestamp']}")
+                # Show correction chain info
+                if meta.get('corrects_id'):
+                    print(f"Corrects: {meta['corrects_id']}")
+                if meta.get('replaced_by'):
+                    print(f"Replaced by: {meta['replaced_by']}")
+                if meta.get('correction_reason') or meta.get('retraction_reason'):
+                    print(f"Reason: {meta.get('correction_reason') or meta.get('retraction_reason')}")
+                if meta.get('mistake'):
+                    print(f"Mistake: {meta['mistake']}")
                 print()
 
     elif args.command == 'consolidate':
@@ -1224,6 +1419,9 @@ Examples:
             print(f"   Avg confidence: {stats['avg_confidence']}")
             print(f"   Decay eligible: {stats['decay_eligible']}")
             print(f"   Pinned: {stats['pinned']}")
+            print(f"   Retracted: {stats['retracted']}")
+            print(f"   Corrections: {stats['corrections']}")
+            print(f"   Lessons: {stats['lessons']}")
             print(f"   Vector DB: {stats['vector_db_path']}")
             print(f"   FTS DB: {stats['fts_db_path']}\n")
 
@@ -1263,6 +1461,25 @@ Examples:
             threshold=args.threshold,
             age_days=args.age_days
         )
+
+    elif args.command == 'correct':
+        if not args.memory_id:
+            print("❌ --memory-id required for correct command")
+            sys.exit(1)
+        if not args.text:
+            print("❌ Corrected text required for correct command")
+            sys.exit(1)
+        correction_id = memory.correct(args.memory_id, args.text, reason=args.reason)
+        if args.json:
+            print(json.dumps({"correction_id": correction_id, "retracted_id": args.memory_id}))
+
+    elif args.command == 'lesson':
+        if not args.text:
+            print("❌ Lesson text required for lesson command")
+            sys.exit(1)
+        lesson_id = memory.lesson(args.text, mistake=args.mistake, category=args.category)
+        if args.json:
+            print(json.dumps({"lesson_id": lesson_id, "text": args.text, "mistake": args.mistake}))
 
 
 if __name__ == "__main__":
