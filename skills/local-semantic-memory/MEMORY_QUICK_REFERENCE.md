@@ -20,14 +20,24 @@ pm2 restart ecosystem.config.js
 # Add memory (auto-detects agent workspace)
 uv run ~/.openclaw/skills/local-semantic-memory/local-semantic-memory.py add "text"
 
-# Search memories
+# Search memories (hybrid vector + FTS5)
 uv run ~/.openclaw/skills/local-semantic-memory/local-semantic-memory.py search "query"
+
+# Search with intent display
+uv run local-semantic-memory.py search "who is my doctor?" --show-intent
+
+# Search with LLM reranking
+uv run local-semantic-memory.py search "query" --rerank
 
 # View stats
 uv run ~/.openclaw/skills/local-semantic-memory/local-semantic-memory.py stats
 
 # Consolidate logs
 uv run ~/.openclaw/skills/local-semantic-memory/local-semantic-memory.py consolidate
+
+# Decay stale memories
+uv run local-semantic-memory.py decay --dry-run
+uv run local-semantic-memory.py decay --age-days 30 --threshold 0.15
 ```
 
 ## Agent-Specific Commands
@@ -41,7 +51,22 @@ uv run local-semantic-memory.py --shared add "shared knowledge"
 
 # With category
 uv run local-semantic-memory.py add "text" --category user_prefs
+
+# Force add (bypass dedup)
+uv run local-semantic-memory.py add "text" --force
 ```
+
+## New CLI Flags
+
+| Flag | Command | Purpose |
+|------|---------|---------|
+| `--show-intent` | search | Show detected query intent and weights |
+| `--rerank` | search | Enable LLM reranking via Ollama |
+| `--rerank-model` | search | Specify Ollama model for reranking |
+| `--force` | add | Bypass deduplication checks |
+| `--dry-run` | decay | Preview decay without changes |
+| `--threshold` | decay | Confidence threshold for deletion (default: 0.15) |
+| `--age-days` | decay | Days since last access (default: 30) |
 
 ## Environment Variables
 
@@ -70,6 +95,9 @@ ps aux | grep ollama
 # Verify workspace structure
 ls -la ~/.openclaw/workspace-*/
 
+# Check FTS5 index
+sqlite3 ~/.openclaw/workspaces/shared/memory.db "SELECT COUNT(*) FROM memories_fts"
+
 # Check agent environment
 pm2 env openclaw-devops
 
@@ -84,6 +112,8 @@ pm2 logs openclaw-devops
 
 - **Skill**: `~/.openclaw/skills/local-semantic-memory/local-semantic-memory.py`
 - **Workspaces**: `~/.openclaw/workspace-<agent>/`
+- **Vector DB**: `~/.openclaw/workspace-<agent>/vector_db/`
+- **FTS DB**: `~/.openclaw/workspace-<agent>/memory.db`
 - **PM2 Config**: `~/.openclaw/ecosystem.config.js`
 - **Setup Script**: `~/.openclaw/scripts/setup-multi-agent-workspaces.sh`
 - **Full Guide**: `~/.openclaw/MULTI_AGENT_MEMORY_SETUP.md`
