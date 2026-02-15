@@ -1,0 +1,6 @@
+{
+  "slug": "aws-cli",
+  "name": "AWS CLI",
+  "version": "1.0.0",
+  "description": "AWS CLI wrapper for agents. Manage AWS infrastructure across EC2, S3, RDS, CloudFront, Route 53, Lambda, SES, ACM, WAF, Backup, IAM, and ElastiCache via subprocess with profile management and convenience wrappers. All output is JSON to stdout; status/errors to stderr."
+}
