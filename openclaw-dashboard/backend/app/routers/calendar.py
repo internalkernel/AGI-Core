@@ -16,6 +16,7 @@ from app.services.calendar import (
     get_merged_feed,
     get_google_calendar_enabled,
     set_google_calendar_enabled,
+    create_google_event,
 )
 
 router = APIRouter(prefix="/api/calendar", tags=["calendar"])
@@ -27,6 +28,8 @@ class CalendarEventCreate(BaseModel):
     start_time: datetime
     end_time: Optional[datetime] = None
     all_day: bool = False
+    agent: Optional[str] = None
+    sync_to_google: bool = False
 
 
 class CalendarEventUpdate(BaseModel):
@@ -35,6 +38,7 @@ class CalendarEventUpdate(BaseModel):
     start_time: Optional[datetime] = None
     end_time: Optional[datetime] = None
     all_day: Optional[bool] = None
+    agent: Optional[str] = None
 
 
 @router.get("/events")
@@ -57,13 +61,25 @@ async def create_event(
     _user=Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
+    google_event_id = None
+    if body.sync_to_google:
+        google_event_id = await create_google_event(
+            title=body.title,
+            start_time=body.start_time.isoformat(),
+            end_time=body.end_time.isoformat() if body.end_time else None,
+            description=body.description,
+            all_day=body.all_day,
+        )
+
     event = CalendarEvent(
         title=body.title,
         description=body.description,
         start_time=body.start_time,
         end_time=body.end_time,
         all_day=body.all_day,
+        agent=body.agent,
         source="dashboard",
+        google_event_id=google_event_id,
     )
     session.add(event)
     await session.commit()
@@ -73,6 +89,8 @@ async def create_event(
         "title": event.title,
         "start_time": event.start_time.isoformat(),
         "end_time": event.end_time.isoformat() if event.end_time else None,
+        "agent": event.agent,
+        "synced_to_google": google_event_id is not None,
     }
 
 
@@ -91,7 +109,8 @@ async def update_event(
         raise HTTPException(status_code=404, detail="Event not found")
     if event.source != "dashboard":
         raise HTTPException(status_code=400, detail="Cannot edit Google Calendar events")
-    for field, value in body.model_dump(exclude_unset=True).items():
+    update_data = body.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
         setattr(event, field, value)
     await session.commit()
     return {"message": "Updated"}

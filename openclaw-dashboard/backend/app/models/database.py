@@ -55,6 +55,7 @@ class CalendarEvent(SQLModel, table=True):
     end_time: Optional[datetime] = Field(default=None, sa_column=Column(TZTimestamp, nullable=True))
     all_day: bool = Field(default=False)
     source: str = Field(default="dashboard")  # "dashboard" or "google"
+    agent: Optional[str] = Field(default=None)  # agent id that owns this event
     google_event_id: Optional[str] = None
     created_at: datetime = Field(default_factory=utcnow, sa_column=Column(TZTimestamp, default=utcnow))
 

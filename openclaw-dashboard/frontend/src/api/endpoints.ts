@@ -1,9 +1,9 @@
 import { apiFetch, apiPost, apiPut, apiPatch, apiDelete } from './client';
 import type {
   DashboardOverview, JobStatus, SystemResources, TokenMetricsResponse,
-  TimeSeriesPoint, MetricsBreakdown, Pipeline, Agent, SkillInfo,
+  TimeSeriesPoint, MetricsBreakdown, Pipeline, Agent, AgentDetail, SkillInfo,
   SkillCategory, DiscoveryResult, SessionInfo, DeviceInfo, LogFile,
-  ConfigData, GatewayStatus,
+  ConfigData, GatewayStatus, ChannelConfig, ProjectInfo, FileNode,
 } from './types';
 
 // Overview
@@ -57,6 +57,15 @@ export const fetchSkills = (params?: { category?: string; search?: string; page?
 };
 export const fetchSkillCategories = () => apiFetch<{ categories: SkillCategory[] }>('/api/skills/categories');
 export const fetchSkillDetail = (name: string) => apiFetch<SkillInfo>(`/api/skills/${name}`);
+export const fetchAgentDetail = (name: string) => apiFetch<AgentDetail>(`/api/agents/${name}`);
+
+// Channels
+export const fetchChannels = () => apiFetch<{ channels: ChannelConfig[] }>('/api/channels');
+export const updateChannel = (id: string, data: Partial<ChannelConfig>) =>
+  apiPut<{ status: string; channel: ChannelConfig }>(`/api/channels/${id}`, data);
+export const createChannel = (data: ChannelConfig) =>
+  apiPost<{ status: string; channel: ChannelConfig }>('/api/channels', data);
+export const deleteChannel = (id: string) => apiDelete<{ status: string }>(`/api/channels/${id}`);
 
 // Logs
 export const fetchLogFiles = () => apiFetch<{ files: LogFile[] }>('/api/logs/files');
@@ -84,6 +93,14 @@ export const approveDevice = (id: string) => apiPost<{ status: string }>(`/api/n
 export const rejectDevice = (id: string) => apiPost<{ status: string }>(`/api/nodes/devices/${id}/reject`, {});
 export const revokeDevice = (id: string) => apiPost<{ status: string }>(`/api/nodes/devices/${id}/revoke`, {});
 export const rotateDeviceToken = (id: string) => apiPost<{ status: string }>(`/api/nodes/devices/${id}/rotate`, {});
+
+// Projects
+export const fetchProjects = (agent: string) =>
+  apiFetch<{ agent: string; projects: ProjectInfo[] }>(`/api/projects?agent=${agent}`);
+export const fetchProjectTree = (agent: string, project: string) =>
+  apiFetch<FileNode>(`/api/projects/${agent}/${encodeURIComponent(project)}/tree`);
+export const fetchProjectFile = (agent: string, path: string) =>
+  apiFetch<{ name: string; content: string | null; size: number }>(`/api/projects/${agent}/file?path=${encodeURIComponent(path)}`);
 
 // Debug
 export const fetchDebugHealth = () => apiFetch<any>('/api/debug/health');

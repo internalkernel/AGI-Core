@@ -1,5 +1,7 @@
 # OpenClaw Dashboard
 
+> **Fork Notice:** This project is a fork of the original [OpenClaw Dashboard](https://github.com/LvcidPsyche/openclaw-dashboard) created by [LvcidPsyche](https://github.com/LvcidPsyche). Full credit to the original maintainers for the foundation — monitoring UI, discovery engine, job management, and the FastAPI + React architecture this build extends. This fork adds multi-agent workspace support, authentication, real-time activity feeds, a calendar, project file browsing, and other features listed below.
+
 A free, open-source monitoring and management dashboard for [OpenClaw](https://openclaw.ai) AI agent workflows.
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
@@ -7,21 +9,29 @@ A free, open-source monitoring and management dashboard for [OpenClaw](https://o
 ![React 19](https://img.shields.io/badge/React-19-61DAFB.svg)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178C6.svg)
 
-![Dashboard Overview](docs/screenshots/dashboard-overview.png)
-
-## Demo
-
-https://github.com/user-attachments/assets/demo.webm
-
-> [Download demo video](docs/demo.webm) (2.9 MB, 78 seconds — all 15 pages)
-
 ## What It Does
 
-OpenClaw Dashboard gives you a single web interface to monitor, manage, and control everything in your OpenClaw workspace:
+### Updated Areas
+
+New pages and capabilities added in this fork:
+
+- **Multi-Agent Setup** — Four specialized agent workspaces (Content Specialist, DevOps, Support Coordinator, Wealth Strategist) with per-agent identity, configuration, and project directories
+- **Authentication** — JWT-based login with admin credentials, auth middleware on all API routes
+- **Activity Feed** — Real-time WebSocket activity stream with event types, timestamps, and agent attribution
+- **Calendar** — Event scheduling and calendar views for managing agent tasks and deadlines
+- **Channels** — Communication channel configuration with per-channel agent assignments and enable/disable toggles
+- **Projects** — File browser replacing Pipelines — browse agent project outputs with expandable folder trees and inline markdown preview
+- **Global Search** — Keyboard-shortcut-accessible search across agents, skills, and content
+- **Database & Redis** — PostgreSQL persistence and Redis caching layer for session and activity data
+- **Webhooks** — Inbound webhook endpoint for external activity ingestion
+
+### Original Functionality
+
+Core features from the [original dashboard](https://github.com/LvcidPsyche/openclaw-dashboard):
 
 - **Overview** — Real-time stats: active jobs, token usage, costs, system health
 - **Jobs** — Full CRUD: create, edit, delete, run now, view run history for cron jobs
-- **Pipelines** — Auto-discovered pipelines with status and stage visualization
+- ~~**Pipelines** — Auto-discovered pipelines with status and stage visualization~~ *(replaced by Projects)*
 - **Agents** — Detected agents with type classification and capabilities
 - **Skills** — Browse installed skills with categories, search, and README viewer
 - **Config** — Tabbed configuration editor (General, Models, Gateway, Agents, Skills, Raw JSON)
@@ -33,41 +43,19 @@ OpenClaw Dashboard gives you a single web interface to monitor, manage, and cont
 - **Docs** — Curated OpenClaw documentation links and quick reference
 - **Chat** — AI chat proxy with model selector and extended thinking toggle
 - **Sessions** — Session management with usage stats, history, model/thinking settings
-- **Settings** — Discovery engine, keyboard shortcuts reference, system info
+- ~~**Settings** — Discovery engine, keyboard shortcuts reference, system info~~ *(merged into Config)*
 
 ## Screenshots
 
-| Overview | Jobs |
-|----------|------|
-| ![Overview](docs/screenshots/dashboard-overview.png) | ![Jobs](docs/screenshots/dashboard-jobs.png) |
+<!-- Screenshots of fork-specific features. Replace with your own captures. -->
 
-| Pipelines | Agents |
-|-----------|--------|
-| ![Pipelines](docs/screenshots/dashboard-pipelines.png) | ![Agents](docs/screenshots/dashboard-agents.png) |
+| Activity Feed | Calendar |
+|---------------|----------|
+| ![Activity Feed](docs/screenshots/dashboard-activity.png) | ![Calendar](docs/screenshots/dashboard-calendar.png) |
 
-| Skills | Config |
-|--------|--------|
-| ![Skills](docs/screenshots/dashboard-skills.png) | ![Config](docs/screenshots/dashboard-config.png) |
-
-| Nodes | Metrics |
-|-------|---------|
-| ![Nodes](docs/screenshots/dashboard-nodes.png) | ![Metrics](docs/screenshots/dashboard-metrics.png) |
-
-| System | Logs |
-|--------|------|
-| ![System](docs/screenshots/dashboard-system.png) | ![Logs](docs/screenshots/dashboard-logs.png) |
-
-| Debug | Docs |
-|-------|------|
-| ![Debug](docs/screenshots/dashboard-debug.png) | ![Docs](docs/screenshots/dashboard-docs.png) |
-
-| Chat | Sessions |
-|------|----------|
-| ![Chat](docs/screenshots/dashboard-chat.png) | ![Sessions](docs/screenshots/dashboard-sessions.png) |
-
-| Settings |
-|----------|
-| ![Settings](docs/screenshots/dashboard-settings.png) |
+| Projects | Channels |
+|----------|----------|
+| ![Projects](docs/screenshots/dashboard-projects.png) | ![Channels](docs/screenshots/dashboard-channels.png) |
 
 ## Quick Start
 
@@ -75,6 +63,7 @@ OpenClaw Dashboard gives you a single web interface to monitor, manage, and cont
 
 - Python 3.10+
 - Node.js 18+
+- PostgreSQL 14+ and Redis 7+
 - An OpenClaw installation (the dashboard reads from `~/.openclaw/`)
 
 ### 1. Clone and install
@@ -130,6 +119,18 @@ The backend serves the built frontend automatically — no separate web server n
 
 ## Features
 
+### Multi-Agent Workspaces
+Four specialized agents, each with their own workspace, identity, skills access, and project output directories. Switch between agents across the dashboard to view per-agent data.
+
+### Activity Feed & Calendar
+Real-time WebSocket activity stream tracking agent events, task completions, and system changes. Calendar page for scheduling and viewing agent tasks with day/week/month views.
+
+### Project File Browser
+Browse agent project outputs organized into named folders. Expandable file trees with inline markdown preview — click any `.md` file to render it in a side panel with formatted headings, bold, italic, code blocks, lists, and links.
+
+### Authentication & Security
+JWT-based login, auth middleware protecting all API routes, security headers (CSP, X-Frame-Options, X-Content-Type-Options), CORS restrictions, request size limiting, and secret redaction in config responses.
+
 ### Full Job Management
 Create, edit, delete, and run cron jobs directly from the dashboard. Supports cron expressions with preset helpers and interval-based scheduling.
 
@@ -153,44 +154,52 @@ Gateway connection testing, health checks, filesystem status verification, activ
 - Confirmation dialogs for destructive actions
 - Loading skeletons and empty states on every page
 
-### Security
-- Security headers (CSP, X-Frame-Options, X-Content-Type-Options)
-- CORS restricted to localhost and configured origins
-- Request size limiting (2MB max)
-- Secret redaction in config API responses
-- Server-side cron expression validation
-
 ## Project Structure
 
 ```
 backend/
   app/
-    main.py              # FastAPI entry point + middleware
+    main.py              # FastAPI entry point + middleware + auth
     config.py            # Environment-based settings (Pydantic)
     routers/             # API modules
       overview.py        #   GET  /api/overview
+      auth.py            #   POST /api/auth/login
       jobs.py            #   CRUD /api/jobs + run/history
       metrics.py         #   GET  /api/metrics/*
       system.py          #   GET  /api/system/*
       sessions.py        #   GET  /api/sessions
+      sessions_mgmt.py   #   CRUD /api/sessions/*
       chat.py            #   POST /api/chat, WS /ws/chat
       logs.py            #   GET  /api/logs/*
-      discovery.py       #   GET  /api/discovery
+      discovery.py       #   GET  /api/discovery, agents, skills
       config.py          #   GET/PUT /api/config
       nodes.py           #   GET /api/nodes + device actions
       debug.py           #   GET /api/debug/*
-      sessions_mgmt.py   #   CRUD /api/sessions/*
+      activity.py        #   GET /api/activity
+      calendar.py        #   CRUD /api/calendar
+      channels.py        #   CRUD /api/channels
+      projects.py        #   GET /api/projects + tree + file
+      search.py          #   GET /api/search
+      webhook.py         #   POST /api/webhook/activity
     services/
       gateway_rpc.py     # Shared gateway WebSocket RPC client
       job_service.py     # Cron job data + control
       cache_trace.py     # Token/cost analytics
+      auth.py            # JWT auth + admin seeding
+      calendar.py        # Calendar event service
+      event_bus.py       # Real-time event broadcasting
     middleware/
       security.py        # Security headers + request size limiting
     discovery/
       engine.py          # Auto-discovery engine
       patterns.py        # Pipeline/agent/skill detection
+    db/
+      connection.py      # PostgreSQL async connection
+    redis/
+      client.py          # Redis connection
     models/
       schemas.py         # Pydantic response models
+      database.py        # SQLAlchemy models
     websocket/
       manager.py         # Multi-channel WebSocket manager
   requirements.txt
@@ -198,14 +207,15 @@ backend/
 
 frontend/
   src/
-    pages/               # 15 page components
+    pages/               # 18 page components
     components/
       layout/            # Sidebar, Header, Layout
       common/            # StatCard, StatusBadge, EmptyState, LoadingState, Toast, ConfirmDialog
-      features/          # JobFormModal
+      features/          # JobFormModal, ActivityFeed, AuthGuard, CalendarWidget, GlobalSearch
     api/                 # Typed fetch client + endpoints
     store/               # Zustand global state
-    hooks/               # usePolling, useToast, useKeyboardShortcuts
+    hooks/               # usePolling, useToast, useKeyboardShortcuts, useAuth, useActivityStream, useGlobalSearch
+    constants/           # Agent definitions
     utils/               # Formatters
 ```
 
@@ -226,6 +236,7 @@ Discovery runs automatically every 5 minutes. Trigger a manual re-scan from Sett
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
+| `POST` | `/api/auth/login` | Authenticate and get JWT token |
 | `GET` | `/api/overview` | Dashboard summary stats |
 | `GET` | `/api/jobs` | All cron jobs with status |
 | `POST` | `/api/jobs` | Create a new cron job |
@@ -238,7 +249,6 @@ Discovery runs automatically every 5 minutes. Trigger a manual re-scan from Sett
 | `PUT` | `/api/config` | Update configuration |
 | `POST` | `/api/config/apply` | Apply config changes |
 | `GET` | `/api/config/schema` | Config schema |
-| `GET` | `/api/config/models` | Available AI models |
 | `GET` | `/api/models` | Available models list |
 | `GET` | `/api/nodes` | Connected nodes |
 | `GET` | `/api/nodes/devices` | Paired devices |
@@ -251,7 +261,6 @@ Discovery runs automatically every 5 minutes. Trigger a manual re-scan from Sett
 | `GET` | `/api/metrics/breakdown` | Cost/token breakdown |
 | `GET` | `/api/system/resources` | CPU, memory, disk stats |
 | `GET` | `/api/system/health` | Service health checks |
-| `GET` | `/api/system/devices` | Paired devices |
 | `GET` | `/api/sessions` | Active sessions |
 | `GET` | `/api/sessions/list` | All sessions with details |
 | `PATCH` | `/api/sessions/{id}` | Update session settings |
@@ -259,6 +268,16 @@ Discovery runs automatically every 5 minutes. Trigger a manual re-scan from Sett
 | `GET` | `/api/sessions/{id}/usage` | Session token usage |
 | `GET` | `/api/sessions/{id}/history` | Session chat history |
 | `GET` | `/api/sessions/usage/timeseries` | Usage over time |
+| `GET` | `/api/activity` | Activity feed events |
+| `GET` | `/api/calendar` | Calendar events |
+| `POST` | `/api/calendar` | Create calendar event |
+| `GET` | `/api/channels` | Communication channels |
+| `PUT` | `/api/channels/{id}` | Update channel config |
+| `GET` | `/api/projects?agent={id}` | List agent project folders |
+| `GET` | `/api/projects/{agent}/{project}/tree` | Project file tree |
+| `GET` | `/api/projects/{agent}/file?path=` | Read project file content |
+| `GET` | `/api/search` | Global search |
+| `POST` | `/api/webhook/activity` | Inbound activity webhook |
 | `GET` | `/api/debug/health` | Detailed health check |
 | `GET` | `/api/debug/status` | Full system status |
 | `GET` | `/api/debug/presence` | System presence |
@@ -279,6 +298,7 @@ Discovery runs automatically every 5 minutes. Trigger a manual re-scan from Sett
 | `GET` | `/api/chat/status` | Gateway availability |
 | `WS` | `/ws/chat` | WebSocket chat |
 | `WS` | `/ws/realtime` | Real-time overview updates |
+| `WS` | `/ws/activity` | Real-time activity stream |
 
 Interactive API docs available at `/docs` when the server is running.
 
@@ -286,13 +306,15 @@ Interactive API docs available at `/docs` when the server is running.
 
 | Layer | Technology |
 |-------|-----------|
-| Backend | FastAPI, Uvicorn, Pydantic, httpx, psutil |
+| Backend | FastAPI, Uvicorn, Pydantic, httpx, psutil, SQLAlchemy, Redis |
 | Frontend | React 19, TypeScript 5.9, Vite 7 |
 | Styling | Tailwind CSS 4 |
 | Charts | Recharts 3 |
 | State | Zustand 5 |
 | Icons | Lucide React |
 | Routing | React Router 7 |
+| Database | PostgreSQL (asyncpg) |
+| Cache | Redis |
 
 ## Keyboard Shortcuts
 
@@ -300,7 +322,7 @@ Interactive API docs available at `/docs` when the server is running.
 |----------|--------|
 | `g` then `o` | Go to Overview |
 | `g` then `j` | Go to Jobs |
-| `g` then `p` | Go to Pipelines |
+| `g` then `p` | Go to Projects |
 | `g` then `a` | Go to Agents |
 | `g` then `s` | Go to Skills |
 | `g` then `m` | Go to Metrics |
@@ -319,6 +341,10 @@ All variables are prefixed with `OPENCLAW_DASH_`. See [`backend/.env.example`](b
 | `GATEWAY_URL` | `http://localhost:18789` | Gateway HTTP URL |
 | `GATEWAY_WS_URL` | `ws://127.0.0.1:18789` | Gateway WebSocket URL |
 | `PORT` | `8765` | Server port |
+| `DATABASE_URL` | | PostgreSQL connection string |
+| `REDIS_URL` | `redis://127.0.0.1:6379/0` | Redis connection string |
+| `SECRET_KEY` | | JWT signing key |
+| `ADMIN_PASSWORD` | `changeme` | Admin login password |
 | `DISCOVERY_INTERVAL_SECONDS` | `300` | Auto-discovery refresh interval |
 
 ## Contributing

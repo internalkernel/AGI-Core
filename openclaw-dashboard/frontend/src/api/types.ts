@@ -23,6 +23,7 @@ export interface JobStatus {
   consecutive_errors: number;
   next_run: string | null;
   error_message: string | null;
+  agent?: string;
 }
 
 export interface CronJobCreate {
@@ -100,6 +101,7 @@ export interface Pipeline {
   metrics: string[];
   status: string;
   source: string;
+  agent?: string;
 }
 
 export interface Agent {
@@ -111,6 +113,27 @@ export interface Agent {
   capabilities: string[];
   source: string;
   status: string;
+  workspace?: string;
+  workspace_label?: string;
+  port?: number;
+  model?: string;
+}
+
+export interface AgentDetail extends Agent {
+  identity?: string;
+  workspace_config?: any;
+  tools?: { name: string; category: string }[];
+  gateway_available?: boolean;
+}
+
+export interface ChannelConfig {
+  id: string;
+  name: string;
+  icon: string;
+  enabled: boolean;
+  agents: string[];
+  config: Record<string, any>;
+  always_show: boolean;
 }
 
 export interface SkillInfo {
@@ -169,6 +192,7 @@ export interface ChatMessage {
   content: string;
   timestamp: number;
   streaming?: boolean;
+  agent?: string;
 }
 
 // Config types
@@ -222,4 +246,20 @@ export interface ModelInfo {
   name?: string;
   provider?: string;
   context_length?: number;
+}
+
+// Project browser types
+export interface ProjectInfo {
+  name: string;
+  file_count: number;
+  last_modified: string | null;
+  path: string;
+}
+
+export interface FileNode {
+  name: string;
+  type: 'file' | 'directory';
+  children?: FileNode[];
+  size?: number;
+  is_markdown?: boolean;
 }

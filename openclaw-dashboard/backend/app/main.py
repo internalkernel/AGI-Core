@@ -18,14 +18,16 @@ from app.db.connection import init_db, close_db, async_session_factory
 from app.redis.client import init_redis, close_redis
 from app.services.auth import seed_admin, decode_token
 from app.routers import (
-    overview, jobs, metrics, system, sessions, chat, logs, discovery,
+    overview, jobs, metrics, system, sessions, chat, logs, discovery, channels,
 )
 from app.routers import config as config_router
 from app.routers import nodes, debug, sessions_mgmt
 from app.routers import auth as auth_router
 from app.routers import activity as activity_router
+from app.routers import webhook as webhook_router
 from app.routers import calendar as calendar_router
 from app.routers import search as search_router
+from app.routers import projects as projects_router
 
 
 async def _discovery_loop():
@@ -82,8 +84,7 @@ app.add_middleware(
         "http://localhost:8765",
         "http://127.0.0.1:8765",
         f"http://{settings.host}:8765" if settings.host != "0.0.0.0" else "http://localhost:8765",
-        "http://76.13.114.80:8765",
-        "https://agents.orthohost.com",
+        *[o.strip() for o in settings.allowed_origins.split(",") if o.strip()],
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -91,7 +92,7 @@ app.add_middleware(
 )
 
 # Auth-exempt paths
-AUTH_EXEMPT = {"/api/auth/login", "/api/system/health", "/docs", "/openapi.json"}
+AUTH_EXEMPT = {"/api/auth/login", "/api/system/health", "/api/webhook/activity", "/docs", "/openapi.json"}
 AUTH_EXEMPT_PREFIXES = ("/ws/", "/assets/")
 
 
@@ -119,6 +120,7 @@ async def auth_middleware(request: Request, call_next):
 # Mount all routers
 app.include_router(auth_router.router)
 app.include_router(activity_router.router)
+app.include_router(webhook_router.router)
 app.include_router(calendar_router.router)
 app.include_router(search_router.router)
 app.include_router(overview.router)
@@ -133,6 +135,8 @@ app.include_router(config_router.router)
 app.include_router(nodes.router)
 app.include_router(debug.router)
 app.include_router(sessions_mgmt.router)
+app.include_router(channels.router)
+app.include_router(projects_router.router)
 
 
 # WebSocket for real-time overview updates

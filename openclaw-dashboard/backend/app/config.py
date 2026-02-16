@@ -19,6 +19,15 @@ class Settings(BaseSettings):
     database_url: str = ""
     redis_url: str = "redis://127.0.0.1:6379/0"
 
+    # Webhook
+    webhook_api_key: str = ""
+
+    # CORS — extra origins beyond the localhost defaults (comma-separated)
+    allowed_origins: str = ""
+
+    # Per-agent gateway tokens (JSON object, e.g. {"devops":"tok1","content-specialist":"tok2"})
+    agent_tokens: str = ""
+
     # Auth
     secret_key: str = ""
     admin_password: str = "changeme"

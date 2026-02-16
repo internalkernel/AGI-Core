@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Layout from './components/layout/Layout';
 import AuthGuard from './components/features/AuthGuard';
 import LoadingState from './components/common/LoadingState';
@@ -19,9 +19,9 @@ const DebugPage = lazy(() => import('./pages/DebugPage'));
 const DocsPage = lazy(() => import('./pages/DocsPage'));
 const ChatPage = lazy(() => import('./pages/ChatPage'));
 const SessionsPage = lazy(() => import('./pages/SessionsPage'));
-const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const ActivityPage = lazy(() => import('./pages/ActivityPage'));
 const CalendarPage = lazy(() => import('./pages/CalendarPage'));
+const ChannelsPage = lazy(() => import('./pages/ChannelsPage'));
 
 export default function App() {
   return (
@@ -44,9 +44,10 @@ export default function App() {
             <Route path="docs" element={<DocsPage />} />
             <Route path="chat" element={<ChatPage />} />
             <Route path="sessions" element={<SessionsPage />} />
-            <Route path="settings" element={<SettingsPage />} />
+            <Route path="settings" element={<Navigate to="/config" replace />} />
             <Route path="activity" element={<ActivityPage />} />
             <Route path="calendar" element={<CalendarPage />} />
+            <Route path="channels" element={<ChannelsPage />} />
           </Route>
         </Routes>
       </Suspense>

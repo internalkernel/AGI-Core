@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Activity, Zap, Settings, Play, Users, Calendar } from 'lucide-react';
+import { Activity, Zap, Settings, Play, Users, Calendar, Bot } from 'lucide-react';
 import type { ActivityItem } from '../../api/activity';
 import { fetchActivities } from '../../api/activity';
 import { useActivityStream } from '../../hooks/useActivityStream';
@@ -10,6 +10,7 @@ const iconMap: Record<string, typeof Activity> = {
   session: Users,
   discovery: Play,
   calendar: Calendar,
+  agent: Bot,
 };
 
 const colorMap: Record<string, string> = {
@@ -19,6 +20,14 @@ const colorMap: Record<string, string> = {
   discovery: 'text-purple-400 bg-purple-400/10',
   calendar: 'text-pink-400 bg-pink-400/10',
   auth: 'text-red-400 bg-red-400/10',
+  agent: 'text-teal-400 bg-teal-400/10',
+};
+
+const agentColorMap: Record<string, { border: string; bg: string }> = {
+  'content-specialist': { border: 'border-l-teal-400/60', bg: 'bg-teal-400/5' },
+  'devops': { border: 'border-l-indigo-400/60', bg: 'bg-indigo-400/5' },
+  'support-coordinator': { border: 'border-l-amber-400/60', bg: 'bg-amber-400/5' },
+  'wealth-strategist': { border: 'border-l-rose-400/60', bg: 'bg-rose-400/5' },
 };
 
 function formatTime(ts: string): string {
@@ -38,19 +47,33 @@ function formatEventType(t: string): string {
 interface Props {
   compact?: boolean;
   limit?: number;
+  entityType?: string;
+  agentId?: string;
 }
 
-export default function ActivityFeed({ compact = false, limit = 20 }: Props) {
+export default function ActivityFeed({ compact = false, limit = 20, entityType, agentId }: Props) {
   const { activities: streamActivities } = useActivityStream();
   const [dbActivities, setDbActivities] = useState<ActivityItem[]>([]);
 
   useEffect(() => {
-    fetchActivities({ limit }).then(setDbActivities).catch(() => {});
-  }, [limit]);
+    const params: Record<string, any> = { limit };
+    if (entityType && entityType !== 'all') params.entity_type = entityType;
+    fetchActivities(params).then(setDbActivities).catch(() => {});
+  }, [limit, entityType]);
 
   // Merge: stream items first, then DB items (deduplicated)
   const streamIds = new Set(streamActivities.map((a) => a.id));
-  const merged = [...streamActivities, ...dbActivities.filter((a) => !streamIds.has(a.id))].slice(0, limit);
+  let merged = [...streamActivities, ...dbActivities.filter((a) => !streamIds.has(a.id))];
+
+  // Client-side filtering
+  if (entityType && entityType !== 'all') {
+    merged = merged.filter((a) => a.entity_type === entityType);
+  }
+  if (agentId) {
+    merged = merged.filter((a) => a.entity_id === agentId || a.actor === agentId);
+  }
+
+  merged = merged.slice(0, limit);
 
   if (compact) {
     return (
@@ -86,8 +109,18 @@ export default function ActivityFeed({ compact = false, limit = 20 }: Props) {
       {merged.map((item) => {
         const color = colorMap[item.entity_type] || 'text-slate-400 bg-slate-400/10';
         const Icon = iconMap[item.entity_type] || Activity;
+        const agentColor = item.entity_type === 'agent' && item.entity_id
+          ? agentColorMap[item.entity_id]
+          : null;
         return (
-          <div key={item.id} className="flex items-start gap-3 bg-slate-800/50 rounded-lg border border-slate-700/50 p-3">
+          <div
+            key={item.id}
+            className={`flex items-start gap-3 rounded-lg border p-3 ${
+              agentColor
+                ? `border-l-2 ${agentColor.border} ${agentColor.bg} border-slate-700/50`
+                : 'bg-slate-800/50 border-slate-700/50'
+            }`}
+          >
             <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${color}`}>
               <Icon size={16} />
             </div>
@@ -102,7 +135,12 @@ export default function ActivityFeed({ compact = false, limit = 20 }: Props) {
                   }`}>{item.status}</span>
                 )}
               </div>
-              {item.entity_id && <p className="text-xs text-slate-400 mt-0.5">{item.entity_type}: {item.entity_id}</p>}
+              {item.actor && (
+                <p className="text-xs text-slate-400 mt-0.5">{item.actor}</p>
+              )}
+              {item.entity_id && !item.actor && (
+                <p className="text-xs text-slate-400 mt-0.5">{item.entity_type}: {item.entity_id}</p>
+              )}
               {item.details && (
                 <p className="text-xs text-slate-500 mt-1 truncate">{JSON.stringify(item.details).slice(0, 120)}</p>
               )}

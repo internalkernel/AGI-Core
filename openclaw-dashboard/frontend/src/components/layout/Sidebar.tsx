@@ -2,10 +2,10 @@ import { useCallback } from 'react';
 import { NavLink } from 'react-router-dom';
 import { useStore } from '../../store';
 import {
-  LayoutDashboard, Briefcase, GitBranch, Bot, Wrench, Cog,
+  LayoutDashboard, Briefcase, FolderOpen, Bot, Wrench,
   BarChart3, Monitor, FileText, Bug, BookOpen,
   MessageSquare, Users, Settings, PanelLeftClose, PanelLeft,
-  Activity, Calendar,
+  Activity, Calendar, Radio,
 } from 'lucide-react';
 
 // Lazy import map — prefetch chunk on hover so navigation feels instant
@@ -23,28 +23,27 @@ const prefetchMap: Record<string, () => void> = {
   '/docs': () => import('../../pages/DocsPage'),
   '/chat': () => import('../../pages/ChatPage'),
   '/sessions': () => import('../../pages/SessionsPage'),
-  '/settings': () => import('../../pages/SettingsPage'),
   '/activity': () => import('../../pages/ActivityPage'),
   '/calendar': () => import('../../pages/CalendarPage'),
+  '/channels': () => import('../../pages/ChannelsPage'),
 };
 
-const links = [
+const mainLinks = [
   { to: '/', icon: LayoutDashboard, label: 'Overview' },
   { to: '/activity', icon: Activity, label: 'Activity' },
+  { to: '/chat', icon: MessageSquare, label: 'Chat' },
   { to: '/calendar', icon: Calendar, label: 'Calendar' },
   { to: '/jobs', icon: Briefcase, label: 'Jobs' },
-  { to: '/pipelines', icon: GitBranch, label: 'Pipelines' },
+  { to: '/pipelines', icon: FolderOpen, label: 'Projects' },
   { to: '/agents', icon: Bot, label: 'Agents' },
+  { to: '/channels', icon: Radio, label: 'Channels' },
   { to: '/skills', icon: Wrench, label: 'Skills' },
-  { to: '/config', icon: Cog, label: 'Config' },
   { to: '/metrics', icon: BarChart3, label: 'Metrics' },
   { to: '/system', icon: Monitor, label: 'System' },
   { to: '/logs', icon: FileText, label: 'Logs' },
   { to: '/debug', icon: Bug, label: 'Debug' },
   { to: '/docs', icon: BookOpen, label: 'Docs' },
-  { to: '/chat', icon: MessageSquare, label: 'Chat' },
   { to: '/sessions', icon: Users, label: 'Sessions' },
-  { to: '/settings', icon: Settings, label: 'Settings' },
 ];
 
 export default function Sidebar() {
@@ -53,6 +52,13 @@ export default function Sidebar() {
   const prefetch = useCallback((to: string) => {
     prefetchMap[to]?.();
   }, []);
+
+  const linkClass = ({ isActive }: { isActive: boolean }) =>
+    `flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+      isActive
+        ? 'bg-blue-600/20 text-blue-400'
+        : 'text-slate-400 hover:text-white hover:bg-slate-800'
+    }`;
 
   return (
     <aside className={`${sidebarOpen ? 'w-56' : 'w-16'} bg-slate-900 border-r border-slate-700/50 flex flex-col transition-all duration-200 shrink-0`}>
@@ -66,25 +72,29 @@ export default function Sidebar() {
         </button>
       </div>
       <nav className="flex-1 py-2 space-y-0.5 px-2 overflow-y-auto">
-        {links.map(({ to, icon: Icon, label }) => (
+        {mainLinks.map(({ to, icon: Icon, label }) => (
           <NavLink
             key={to}
             to={to}
             end={to === '/'}
             onMouseEnter={() => prefetch(to)}
-            className={({ isActive }) =>
-              `flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                isActive
-                  ? 'bg-blue-600/20 text-blue-400'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
-              }`
-            }
+            className={linkClass}
           >
             <Icon size={18} className="shrink-0" />
             {sidebarOpen && <span>{label}</span>}
           </NavLink>
         ))}
       </nav>
+      <div className="px-2 pb-1">
+        <NavLink
+          to="/config"
+          onMouseEnter={() => prefetch('/config')}
+          className={linkClass}
+        >
+          <Settings size={18} className="shrink-0" />
+          {sidebarOpen && <span>Settings</span>}
+        </NavLink>
+      </div>
       <div className="p-3 border-t border-slate-700/50">
         {sidebarOpen && (
           <div className="text-xs text-slate-500 text-center">

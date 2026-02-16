@@ -70,7 +70,7 @@ export default function LogsPage() {
       </div>
 
       <div className="flex gap-4 flex-1 min-h-0">
-        <div className="w-56 shrink-0 space-y-1">
+        <div className="w-72 shrink-0 space-y-1">
           {files.map((f) => (
             <button key={f.name} onClick={() => setSelected(f.name)}
               className={`w-full text-left px-3 py-2 rounded-lg text-sm flex items-center gap-2 ${selected === f.name ? 'bg-blue-600/20 text-blue-400' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}>

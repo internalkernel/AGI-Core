@@ -31,12 +31,19 @@ def _req_id() -> str:
     return str(uuid.uuid4())[:8]
 
 
-async def _handshake(ws_conn) -> bool:
-    """Perform the gateway challenge-response handshake. Returns True on success."""
+async def _handshake(ws_conn, token: str | None = None) -> bool:
+    """Perform the gateway challenge-response handshake. Returns True on success.
+
+    Args:
+        ws_conn: WebSocket connection to the gateway.
+        token: Override token. Falls back to settings.gateway_token if not provided.
+    """
     raw = await asyncio.wait_for(ws_conn.recv(), timeout=HANDSHAKE_TIMEOUT)
     msg = json.loads(raw)
     if msg.get("event") != "connect.challenge":
         return False
+
+    auth_token = token or settings.gateway_token
 
     connect_msg = {
         "type": "req",
@@ -54,7 +61,7 @@ async def _handshake(ws_conn) -> bool:
             },
             "role": ROLE,
             "scopes": SCOPES,
-            "auth": {"token": settings.gateway_token},
+            "auth": {"token": auth_token},
             "caps": [],
         },
     }
@@ -75,9 +82,7 @@ async def gateway_call(
     Returns the full response dict. Raises on connection or timeout errors.
     """
     uri = settings.gateway_ws_url
-    headers = {"Origin": "http://localhost:8765"}
-
-    async with websockets.connect(uri, open_timeout=3, additional_headers=headers) as gw:
+    async with websockets.connect(uri, open_timeout=3, origin="http://localhost:8765") as gw:
         if not await _handshake(gw):
             raise ConnectionError("Gateway authentication failed")
 
@@ -120,9 +125,7 @@ async def gateway_call_streaming(
 ) -> AsyncGenerator[Dict[str, Any], None]:
     """Open WebSocket, perform handshake, send RPC request, yield events."""
     uri = settings.gateway_ws_url
-    headers = {"Origin": "http://localhost:8765"}
-
-    async with websockets.connect(uri, open_timeout=3, additional_headers=headers) as gw:
+    async with websockets.connect(uri, open_timeout=3, origin="http://localhost:8765") as gw:
         if not await _handshake(gw):
             raise ConnectionError("Gateway authentication failed")
 
@@ -172,8 +175,7 @@ async def gateway_health_check() -> bool:
     """Quick check if gateway WebSocket is reachable and auth works."""
     try:
         uri = settings.gateway_ws_url
-        headers = {"Origin": "http://localhost:8765"}
-        async with websockets.connect(uri, open_timeout=2, additional_headers=headers) as gw:
+        async with websockets.connect(uri, open_timeout=2, origin="http://localhost:8765") as gw:
             return await _handshake(gw)
     except Exception:
         return False

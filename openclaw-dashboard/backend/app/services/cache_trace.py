@@ -1,25 +1,38 @@
-"""Streaming reader for the cache-trace.jsonl file.
+"""Streaming reader for cache-trace.jsonl files.
 
-Strategy: Read the file ONCE on startup (last 10MB only — enough for recent data),
-build all aggregates in a single pass, cache for 5 minutes. All three endpoints
-(tokens, timeseries, breakdown) share the same parsed data.
+Strategy: Read the files ONCE on startup (last 10MB only per file — enough for
+recent data), build all aggregates in a single pass, cache for 5 minutes. All
+three endpoints (tokens, timeseries, breakdown) share the same parsed data.
+
+Supports multi-agent workspaces: aggregates traces from the root logs/ dir
+and from each workspace-*/logs/ directory.
 """
 
 import json
 import time
 from collections import defaultdict
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Dict, List
 
 from app.config import settings
-
-_trace_file = settings.openclaw_dir / "logs" / "cache-trace.jsonl"
 
 # Shared cache — one parse feeds all endpoints
 _parsed_entries: List[Dict] = []
 _parse_time = 0.0
 _PARSE_TTL = 300  # 5 minutes — no need to re-read constantly
 _MAX_READ_BYTES = 10_000_000  # 10MB from end of file — covers recent data
+
+
+def _get_trace_files() -> List[Path]:
+    """Return all existing cache-trace.jsonl paths across workspaces."""
+    candidates = [settings.openclaw_dir / "logs" / "cache-trace.jsonl"]
+    try:
+        for p in sorted(settings.openclaw_dir.glob("workspace-*/logs/cache-trace.jsonl")):
+            candidates.append(p)
+    except Exception:
+        pass
+    return [f for f in candidates if f.exists()]
 
 
 def _cost_for_model(model_id: str, provider: str, inp: int, out: int) -> float:
@@ -34,25 +47,14 @@ def _cost_for_model(model_id: str, provider: str, inp: int, out: int) -> float:
     return 0.0
 
 
-def _ensure_parsed():
-    """Single-pass parse of the tail of the trace file. Cached for 5 min."""
-    global _parsed_entries, _parse_time
-
-    now = time.time()
-    if _parsed_entries and now - _parse_time < _PARSE_TTL:
-        return
-
-    if not _trace_file.exists():
-        _parsed_entries = []
-        _parse_time = now
-        return
-
+def _parse_trace_file(trace_file: Path, agent_label: str) -> List[Dict]:
+    """Parse a single trace file, returning entries with agent label."""
     entries = []
     try:
-        file_size = _trace_file.stat().st_size
+        file_size = trace_file.stat().st_size
         read_from = max(0, file_size - _MAX_READ_BYTES)
 
-        with open(_trace_file) as f:
+        with open(trace_file) as f:
             if read_from > 0:
                 f.seek(read_from)
                 f.readline()  # skip partial line
@@ -63,16 +65,44 @@ def _ensure_parsed():
                     ts_str = entry.get("ts", "")
                     if not ts_str:
                         continue
-                    # Pre-parse timestamp once
                     entry["_ts"] = datetime.fromisoformat(
                         ts_str.replace("Z", "+00:00")
                     ).replace(tzinfo=None)
+                    entry["_agent"] = agent_label
                     entries.append(entry)
                 except Exception:
                     continue
     except Exception:
         pass
+    return entries
 
+
+def _ensure_parsed():
+    """Parse the tail of all trace files across workspaces. Cached for 5 min."""
+    global _parsed_entries, _parse_time
+
+    now = time.time()
+    if _parsed_entries and now - _parse_time < _PARSE_TTL:
+        return
+
+    trace_files = _get_trace_files()
+    if not trace_files:
+        _parsed_entries = []
+        _parse_time = now
+        return
+
+    entries = []
+    for tf in trace_files:
+        # Derive agent label from path: workspace-foo/logs/... -> "foo"
+        parent_dir = tf.parent.parent.name
+        if parent_dir.startswith("workspace-"):
+            agent_label = parent_dir.replace("workspace-", "")
+        else:
+            agent_label = "default"
+        entries.extend(_parse_trace_file(tf, agent_label))
+
+    # Sort by timestamp for consistent ordering
+    entries.sort(key=lambda e: e["_ts"])
     _parsed_entries = entries
     _parse_time = now
 

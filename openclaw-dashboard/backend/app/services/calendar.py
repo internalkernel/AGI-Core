@@ -41,6 +41,38 @@ async def get_google_events(days: int = 30) -> list[dict]:
         return []
 
 
+async def create_google_event(
+    title: str,
+    start_time: str,
+    end_time: Optional[str] = None,
+    description: Optional[str] = None,
+    all_day: bool = False,
+) -> Optional[str]:
+    """Create an event on Google Calendar via gwcli. Returns Google event ID or None."""
+    try:
+        args = ["gwcli", "calendar", "create", "--title", title, "--start", start_time]
+        if end_time:
+            args.extend(["--end", end_time])
+        if description:
+            args.extend(["--description", description])
+        if all_day:
+            args.append("--all-day")
+        args.extend(["--format", "json"])
+
+        proc = await asyncio.create_subprocess_exec(
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=15)
+        if proc.returncode == 0 and stdout:
+            data = json.loads(stdout.decode())
+            return data.get("id") or data.get("eventId")
+        return None
+    except Exception:
+        return None
+
+
 async def get_google_calendar_enabled(session: AsyncSession) -> bool:
     result = await session.execute(
         select(DashboardSetting).where(DashboardSetting.key == "google_calendar_enabled")
@@ -84,6 +116,7 @@ async def get_merged_feed(
             "end_time": e.end_time.isoformat() if e.end_time else None,
             "all_day": e.all_day,
             "source": "dashboard",
+            "agent": e.agent,
         }
         for e in dashboard_events
     ]

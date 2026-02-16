@@ -1,9 +1,14 @@
 """Discovery API — pipelines, agents, skills."""
 
+import json
+from pathlib import Path
 from typing import Optional
+
+import httpx
 from fastapi import APIRouter, Query
 
-from app.discovery.engine import run_discovery, get_cached_result
+from app.config import settings
+from app.discovery.engine import run_discovery, get_cached_result, discover_skills
 
 router = APIRouter(tags=["discovery"])
 
@@ -47,6 +52,68 @@ async def list_agents():
     if not result:
         result = run_discovery()
     return {"agents": result.get("agents", []), "total": len(result.get("agents", []))}
+
+
+@router.get("/api/agents/{agent_name}")
+async def get_agent_detail(agent_name: str):
+    """Get extended agent info: identity, workspace config, tools, gateway status."""
+    result = get_cached_result()
+    if not result:
+        result = run_discovery()
+
+    agent = None
+    for a in result.get("agents", []):
+        if a["name"] == agent_name:
+            agent = dict(a)
+            break
+    if not agent:
+        return {"error": "Agent not found"}
+
+    workspace_path = agent.get("workspace")
+    if workspace_path:
+        ws = Path(workspace_path)
+
+        # Read IDENTITY.md
+        identity_file = ws / "IDENTITY.md"
+        if identity_file.exists():
+            try:
+                agent["identity"] = identity_file.read_text()[:2000]
+            except Exception:
+                agent["identity"] = None
+        else:
+            agent["identity"] = None
+
+        # Read config.json as workspace_config
+        config_file = ws / "config.json"
+        if config_file.exists():
+            try:
+                agent["workspace_config"] = json.loads(config_file.read_text())
+            except Exception:
+                agent["workspace_config"] = None
+        else:
+            agent["workspace_config"] = None
+
+        # Check gateway availability
+        port = agent.get("port")
+        if port:
+            try:
+                async with httpx.AsyncClient(timeout=2.0) as client:
+                    resp = await client.get(f"http://127.0.0.1:{port}/health")
+                    agent["gateway_available"] = resp.status_code == 200
+            except Exception:
+                agent["gateway_available"] = False
+        else:
+            agent["gateway_available"] = None
+    else:
+        agent["identity"] = None
+        agent["workspace_config"] = None
+        agent["gateway_available"] = None
+
+    # List shared skills
+    skills = discover_skills()
+    agent["tools"] = [{"name": s["name"], "category": s["category"]} for s in skills]
+
+    return agent
 
 
 @router.get("/api/skills")

@@ -53,7 +53,7 @@ export function useKeyboardShortcuts() {
           h: '/docs',
           t: '/chat',
           e: '/sessions',
-          i: '/settings',
+          i: '/config',
         };
 
         if (routes[e.key]) {

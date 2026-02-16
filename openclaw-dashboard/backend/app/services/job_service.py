@@ -132,40 +132,80 @@ def control_job(job_id: str, action: str) -> Dict:
     return {"status": "success", "job_id": job_id, "action": action}
 
 
+def _get_all_session_dirs() -> List[tuple]:
+    """Return (sessions_dir, agent_label) tuples for all workspaces."""
+    dirs = []
+    # Original location
+    root_sessions = settings.openclaw_dir / "agents" / "main" / "sessions"
+    if root_sessions.exists():
+        dirs.append((root_sessions, "default"))
+    # Per-agent workspaces
+    try:
+        for ws in sorted(settings.openclaw_dir.glob("workspace-*")):
+            if not ws.is_dir():
+                continue
+            sd = ws / "agents" / "main" / "sessions"
+            if sd.exists():
+                label = ws.name.replace("workspace-", "")
+                dirs.append((sd, label))
+    except Exception:
+        pass
+    return dirs
+
+
 def get_session_count() -> int:
     return _cached("session_count", 30, lambda: _count_sessions())
 
 
 def _count_sessions() -> int:
-    sessions_dir = settings.openclaw_dir / "agents" / "main" / "sessions"
+    count = 0
+    for sessions_dir, _ in _get_all_session_dirs():
+        try:
+            count += len(list(sessions_dir.glob("*.jsonl")))
+        except Exception:
+            pass
+    # Also count from sessions.json files in workspaces
     try:
-        return len(list(sessions_dir.glob("*.jsonl")))
+        for sj in settings.openclaw_dir.glob("workspace-*/sessions.json"):
+            try:
+                data = json.loads(sj.read_text())
+                if isinstance(data, list):
+                    count += len(data)
+                elif isinstance(data, dict):
+                    count += len(data.get("sessions", []))
+            except Exception:
+                pass
     except Exception:
-        return 0
+        pass
+    return count
 
 
 def get_sessions_detailed() -> List[Dict]:
-    sessions_dir = settings.openclaw_dir / "agents" / "main" / "sessions"
     sessions = []
-    if not sessions_dir.exists():
-        return sessions
-    for sf in sorted(sessions_dir.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)[:20]:
+    for sessions_dir, agent_label in _get_all_session_dirs():
         try:
-            lines = sf.read_text().strip().split("\n")
-            if lines:
-                first = json.loads(lines[0])
-                last = json.loads(lines[-1])
-                sessions.append({
-                    "id": sf.stem,
-                    "started": first.get("timestamp", ""),
-                    "last_activity": last.get("timestamp", ""),
-                    "messages": len(lines),
-                    "model": last.get("model", "unknown"),
-                    "status": "active" if len(lines) < 100 else "archived",
-                })
+            for sf in sorted(sessions_dir.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)[:20]:
+                try:
+                    lines = sf.read_text().strip().split("\n")
+                    if lines:
+                        first = json.loads(lines[0])
+                        last = json.loads(lines[-1])
+                        sessions.append({
+                            "id": sf.stem,
+                            "agent": agent_label,
+                            "started": first.get("timestamp", ""),
+                            "last_activity": last.get("timestamp", ""),
+                            "messages": len(lines),
+                            "model": last.get("model", "unknown"),
+                            "status": "active" if len(lines) < 100 else "archived",
+                        })
+                except Exception:
+                    continue
         except Exception:
             continue
-    return sessions
+    # Sort all sessions by last_activity descending
+    sessions.sort(key=lambda s: s.get("last_activity", ""), reverse=True)
+    return sessions[:20]
 
 
 def get_devices() -> List[Dict]:

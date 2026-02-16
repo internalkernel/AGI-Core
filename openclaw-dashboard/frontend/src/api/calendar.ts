@@ -8,6 +8,7 @@ export interface CalendarEvent {
   end_time?: string | null;
   all_day: boolean;
   source: 'dashboard' | 'google';
+  agent?: string | null;
 }
 
 export interface CalendarEventCreate {
@@ -16,6 +17,8 @@ export interface CalendarEventCreate {
   start_time: string;
   end_time?: string;
   all_day?: boolean;
+  agent?: string;
+  sync_to_google?: boolean;
 }
 
 export function fetchCalendarEvents(start?: string, end?: string, include_google = true): Promise<CalendarEvent[]> {
