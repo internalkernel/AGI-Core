@@ -45,7 +45,15 @@ Core features from the [original dashboard](https://github.com/LvcidPsyche/openc
 - **Sessions** — Session management with usage stats, history, model/thinking settings
 - ~~**Settings** — Discovery engine, keyboard shortcuts reference, system info~~ *(merged into Config)*
 
-<!-- ## Screenshots — TODO: add captures of Activity Feed, Calendar, Projects, Channels -->
+## Screenshots
+
+| Activity Feed | Calendar |
+|---------------|----------|
+| ![Activity Feed](docs/screenshots/dashboard-activity.png) | ![Calendar](docs/screenshots/dashboard-calendar.png) |
+
+| Projects | Channels |
+|----------|----------|
+| ![Projects](docs/screenshots/dashboard-projects.png) | ![Channels](docs/screenshots/dashboard-channels.png) |
 
 ## Quick Start
 
