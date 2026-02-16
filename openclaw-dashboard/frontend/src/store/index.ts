@@ -16,6 +16,7 @@ interface DashboardStore {
   skillCategories: SkillCategory[];
   skillsTotal: number;
   timeseries: TimeSeriesPoint[];
+  timeseriesModels: string[];
   breakdown: MetricsBreakdown | null;
   chatMessages: ChatMessage[];
   logFiles: LogFile[];
@@ -53,6 +54,7 @@ export const useStore = create<DashboardStore>((set, get) => ({
   skillCategories: [],
   skillsTotal: 0,
   timeseries: [],
+  timeseriesModels: [],
   breakdown: null,
   chatMessages: [],
   logFiles: [],
@@ -126,8 +128,8 @@ export const useStore = create<DashboardStore>((set, get) => ({
 
   fetchTimeseries: async (metric = 'tokens', hours = 24) => {
     try {
-      const { data } = await api.fetchTimeseries(metric, hours);
-      set({ timeseries: data });
+      const res = await api.fetchTimeseries(metric, hours);
+      set({ timeseries: res.data, timeseriesModels: res.models || [] });
     } catch {}
   },
 

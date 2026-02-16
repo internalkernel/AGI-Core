@@ -1,6 +1,8 @@
 """Session management endpoints using gateway RPC."""
 
-from fastapi import APIRouter
+from typing import Optional
+
+from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
 
 from app.config import settings
@@ -11,10 +13,10 @@ router = APIRouter(tags=["sessions_mgmt"])
 
 
 @router.get("/api/sessions/list")
-async def list_sessions():
+async def list_sessions(agent: Optional[str] = Query(None)):
     """List all sessions — tries RPC, falls back to file."""
     try:
-        result = await gateway_call("sessions.list")
+        result = await gateway_call("sessions.list", agent=agent)
         if result.get("ok"):
             return {"sessions": result.get("result", {}).get("sessions", [])}
     except Exception:
@@ -23,10 +25,10 @@ async def list_sessions():
 
 
 @router.get("/api/sessions/{session_id}/usage")
-async def session_usage(session_id: str):
+async def session_usage(session_id: str, agent: Optional[str] = Query(None)):
     """Get session usage/cost via RPC."""
     try:
-        result = await gateway_call("sessions.usage", {"sessionId": session_id})
+        result = await gateway_call("sessions.usage", {"sessionId": session_id}, agent=agent)
         if result.get("ok"):
             return result.get("result", {})
     except Exception:
@@ -35,7 +37,7 @@ async def session_usage(session_id: str):
 
 
 @router.patch("/api/sessions/{session_id}")
-async def update_session(session_id: str, data: dict):
+async def update_session(session_id: str, data: dict, agent: Optional[str] = Query(None)):
     """Update session settings (model, thinking, reasoning) via RPC."""
     params = {"sessionId": session_id}
     if "model" in data:
@@ -52,7 +54,7 @@ async def update_session(session_id: str, data: dict):
         params["maxTokens"] = data["maxTokens"]
 
     try:
-        result = await gateway_call("sessions.patch", params)
+        result = await gateway_call("sessions.patch", params, agent=agent)
         if result.get("ok"):
             return {"status": "updated", "session_id": session_id}
         return JSONResponse({"error": result.get("error", "Failed to update session")}, status_code=500)
@@ -63,10 +65,10 @@ async def update_session(session_id: str, data: dict):
 
 
 @router.delete("/api/sessions/{session_id}")
-async def delete_session(session_id: str):
+async def delete_session(session_id: str, agent: Optional[str] = Query(None)):
     """Delete a session via RPC."""
     try:
-        result = await gateway_call("sessions.delete", {"sessionId": session_id})
+        result = await gateway_call("sessions.delete", {"sessionId": session_id}, agent=agent)
         if result.get("ok"):
             return {"status": "deleted", "session_id": session_id}
         return JSONResponse({"error": result.get("error", "Failed to delete session")}, status_code=500)
@@ -77,10 +79,10 @@ async def delete_session(session_id: str):
 
 
 @router.get("/api/sessions/{session_id}/history")
-async def session_history(session_id: str):
+async def session_history(session_id: str, agent: Optional[str] = Query(None)):
     """Get chat history for a session via RPC."""
     try:
-        result = await gateway_call("chat.history", {"sessionId": session_id})
+        result = await gateway_call("chat.history", {"sessionId": session_id}, agent=agent)
         if result.get("ok"):
             return {"messages": result.get("result", {}).get("messages", [])}
     except Exception:
@@ -89,10 +91,10 @@ async def session_history(session_id: str):
 
 
 @router.get("/api/sessions/usage/timeseries")
-async def usage_timeseries():
+async def usage_timeseries(agent: Optional[str] = Query(None)):
     """Get usage timeseries via RPC."""
     try:
-        result = await gateway_call("sessions.usage.timeseries")
+        result = await gateway_call("sessions.usage.timeseries", agent=agent)
         if result.get("ok"):
             return result.get("result", {})
     except Exception:

@@ -80,14 +80,14 @@ export interface TokenModel {
 }
 
 export interface TimeSeriesPoint {
-  timestamp: string;
-  value: number;
   label: string;
+  [model: string]: string | number;
 }
 
 export interface MetricsBreakdown {
   by_model: { model: string; tokens: number; cost: number; requests: number }[];
   daily_trend: { date: string; tokens: number; cost: number }[];
+  daily_model?: { date: string; model: string; tokens: number; cost: number; count: number }[];
 }
 
 export interface Pipeline {

@@ -14,42 +14,15 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 
 from app.config import settings
-from app.services.gateway_rpc import _handshake
+from app.services.gateway_rpc import (
+    _handshake,
+    AGENT_GATEWAYS,
+    DEFAULT_AGENT,
+    _agent_ws_url as _gateway_ws_url,
+    _agent_token as _gateway_token,
+)
 
 router = APIRouter(tags=["chat"])
-
-# Agent → gateway WebSocket mapping
-AGENT_GATEWAYS: dict[str, str] = {
-    "content-specialist": "ws://127.0.0.1:8410",
-    "devops": "ws://127.0.0.1:8420",
-    "support-coordinator": "ws://127.0.0.1:8430",
-    "wealth-strategist": "ws://127.0.0.1:8440",
-}
-
-def _load_agent_tokens() -> dict[str, str]:
-    """Load per-agent tokens from OPENCLAW_DASH_AGENT_TOKENS env var (JSON)."""
-    import json as _json
-    raw = settings.agent_tokens
-    if raw:
-        try:
-            return _json.loads(raw)
-        except Exception:
-            pass
-    return {}
-
-DEFAULT_AGENT = "content-specialist"
-
-
-def _gateway_ws_url(agent: str | None) -> str:
-    if agent and agent in AGENT_GATEWAYS:
-        return AGENT_GATEWAYS[agent]
-    return AGENT_GATEWAYS.get(DEFAULT_AGENT, settings.gateway_ws_url)
-
-
-def _gateway_token(agent: str | None) -> str:
-    agent_id = agent or DEFAULT_AGENT
-    tokens = _load_agent_tokens()
-    return tokens.get(agent_id, settings.gateway_token)
 
 
 def _gateway_http_url(agent: str | None) -> str:

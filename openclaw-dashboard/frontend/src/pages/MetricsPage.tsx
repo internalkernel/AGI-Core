@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useStore } from '../store';
 import { formatNumber } from '../utils/format';
 import { Download } from 'lucide-react';
@@ -7,11 +7,19 @@ import {
   Tooltip, ResponsiveContainer, PieChart, Pie, Cell,
 } from 'recharts';
 
-const COLORS = ['#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981', '#ef4444'];
+const MODEL_COLORS = [
+  '#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981',
+  '#ef4444', '#06b6d4', '#f97316', '#84cc16', '#a855f7',
+  '#14b8a6', '#e11d48',
+];
+
+function colorForModel(index: number): string {
+  return MODEL_COLORS[index % MODEL_COLORS.length];
+}
 
 export default function MetricsPage() {
-  const { timeseries, breakdown, fetchTimeseries, fetchBreakdown } = useStore();
-  const [hours, setHours] = useState(24);
+  const { timeseries, timeseriesModels, breakdown, fetchTimeseries, fetchBreakdown } = useStore();
+  const [hours, setHours] = useState(168);
   const [metric, setMetric] = useState<'tokens' | 'cost'>('tokens');
 
   useEffect(() => {
@@ -21,6 +29,37 @@ export default function MetricsPage() {
 
   const totalTokens = breakdown?.by_model?.reduce((a, b) => a + b.tokens, 0) ?? 0;
   const totalCost = breakdown?.by_model?.reduce((a, b) => a + b.cost, 0) ?? 0;
+
+  // Build per-model daily trend data from breakdown.daily_model
+  const { dailyTrendData, dailyTrendModels } = useMemo(() => {
+    const dm = breakdown?.daily_model;
+    if (!dm || dm.length === 0) {
+      return { dailyTrendData: breakdown?.daily_trend ?? [], dailyTrendModels: [] as string[] };
+    }
+
+    const models = new Set<string>();
+    const pivot: Record<string, Record<string, number>> = {};
+    for (const entry of dm) {
+      models.add(entry.model);
+      if (!pivot[entry.date]) pivot[entry.date] = {};
+      pivot[entry.date][entry.model] = (pivot[entry.date][entry.model] || 0) +
+        (metric === 'tokens' ? entry.tokens : entry.cost);
+    }
+
+    const sortedModels = Array.from(models).sort();
+    const data = Object.keys(pivot).sort().map(date => {
+      const point: Record<string, any> = { date };
+      for (const m of sortedModels) {
+        point[m] = pivot[date][m] || 0;
+      }
+      return point;
+    });
+
+    return { dailyTrendData: data, dailyTrendModels: sortedModels };
+  }, [breakdown, metric]);
+
+  // Determine models for the line chart
+  const lineModels = timeseriesModels.length > 0 ? timeseriesModels : [];
 
   const exportCsv = () => {
     if (!breakdown?.by_model) return;
@@ -80,27 +119,59 @@ export default function MetricsPage() {
         ))}
       </div>
 
+      {/* Usage Over Time — per-model lines */}
       <div className="bg-slate-800/50 rounded-xl p-5 border border-slate-700/50">
-        <h3 className="text-sm font-semibold text-slate-300 mb-4">{metric === 'tokens' ? 'Token Usage' : 'Cost'} Over Time</h3>
+        <h3 className="text-sm font-semibold text-slate-300 mb-4">
+          {metric === 'tokens' ? 'Token Usage' : 'Cost'} Over Time
+        </h3>
         <ResponsiveContainer width="100%" height={300}>
           <LineChart data={timeseries}>
             <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
             <XAxis dataKey="label" stroke="#94a3b8" fontSize={11} />
             <YAxis stroke="#94a3b8" fontSize={11} />
-            <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #475569', borderRadius: 8 }} />
-            <Line type="monotone" dataKey="value" stroke="#3b82f6" strokeWidth={2} dot={false} />
+            <Tooltip
+              contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #475569', borderRadius: 8 }}
+              labelStyle={{ color: '#94a3b8' }}
+              itemStyle={{ fontSize: 12 }}
+            />
+            {lineModels.length > 0 ? (
+              lineModels.map((model, i) => (
+                <Line
+                  key={model}
+                  type="monotone"
+                  dataKey={model}
+                  stroke={colorForModel(i)}
+                  strokeWidth={2}
+                  dot={false}
+                  name={model}
+                />
+              ))
+            ) : (
+              <Line type="monotone" dataKey="value" stroke="#3b82f6" strokeWidth={2} dot={false} name="Total" />
+            )}
           </LineChart>
         </ResponsiveContainer>
+        {lineModels.length > 0 && (
+          <div className="flex flex-wrap gap-4 mt-3 justify-center">
+            {lineModels.map((model, i) => (
+              <div key={model} className="flex items-center gap-1.5 text-xs text-slate-300">
+                <div className="w-3 h-0.5 rounded" style={{ backgroundColor: colorForModel(i) }} />
+                {model}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Pie Chart — Usage by Model */}
         <div className="bg-slate-800/50 rounded-xl p-5 border border-slate-700/50">
           <h3 className="text-sm font-semibold text-slate-300 mb-4">Usage by Model</h3>
           <ResponsiveContainer width="100%" height={250}>
             <PieChart>
               <Pie data={breakdown?.by_model ?? []} dataKey="tokens" nameKey="model" cx="50%" cy="50%" innerRadius={60} outerRadius={90} paddingAngle={2}>
                 {(breakdown?.by_model ?? []).map((_, i) => (
-                  <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                  <Cell key={i} fill={colorForModel(i)} />
                 ))}
               </Pie>
               <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #475569', borderRadius: 8 }} />
@@ -109,24 +180,52 @@ export default function MetricsPage() {
           <div className="flex flex-wrap gap-3 mt-2 justify-center">
             {(breakdown?.by_model ?? []).map((m, i) => (
               <div key={m.model} className="flex items-center gap-1.5 text-xs text-slate-300">
-                <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: COLORS[i % COLORS.length] }} />
+                <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: colorForModel(i) }} />
                 {m.model}
               </div>
             ))}
           </div>
         </div>
 
+        {/* Daily Trend — stacked bars per model */}
         <div className="bg-slate-800/50 rounded-xl p-5 border border-slate-700/50">
           <h3 className="text-sm font-semibold text-slate-300 mb-4">Daily Trend</h3>
           <ResponsiveContainer width="100%" height={250}>
-            <BarChart data={breakdown?.daily_trend ?? []}>
+            <BarChart data={dailyTrendData}>
               <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
               <XAxis dataKey="date" stroke="#94a3b8" fontSize={11} />
               <YAxis stroke="#94a3b8" fontSize={11} />
-              <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #475569', borderRadius: 8 }} />
-              <Bar dataKey="tokens" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
+              <Tooltip
+                contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #475569', borderRadius: 8 }}
+                labelStyle={{ color: '#94a3b8' }}
+                itemStyle={{ fontSize: 12 }}
+              />
+              {dailyTrendModels.length > 0 ? (
+                dailyTrendModels.map((model, i) => (
+                  <Bar
+                    key={model}
+                    dataKey={model}
+                    stackId="stack"
+                    fill={colorForModel(i)}
+                    radius={i === dailyTrendModels.length - 1 ? [4, 4, 0, 0] : [0, 0, 0, 0]}
+                    name={model}
+                  />
+                ))
+              ) : (
+                <Bar dataKey="tokens" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
+              )}
             </BarChart>
           </ResponsiveContainer>
+          {dailyTrendModels.length > 0 && (
+            <div className="flex flex-wrap gap-4 mt-3 justify-center">
+              {dailyTrendModels.map((model, i) => (
+                <div key={model} className="flex items-center gap-1.5 text-xs text-slate-300">
+                  <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: colorForModel(i) }} />
+                  {model}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>

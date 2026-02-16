@@ -1,12 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useToast } from '../hooks/useToast';
 import { usePolling } from '../hooks/usePolling';
 import EmptyState from '../components/common/EmptyState';
 import { Trash2, ChevronDown, ChevronRight, RefreshCw, Download } from 'lucide-react';
+import { AGENTS } from '../constants/agents';
 import * as api from '../api/endpoints';
 
 export default function SessionsPage() {
   const toast = useToast();
+  const [activeAgent, setActiveAgent] = useState(AGENTS[0].id);
   const [sessions, setSessions] = useState<any[]>([]);
   const [models, setModels] = useState<any[]>([]);
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -14,18 +16,21 @@ export default function SessionsPage() {
   const [loading, setLoading] = useState(true);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
-  const loadSessions = async () => {
+  const loadSessions = useCallback(async () => {
     try {
-      const data = await api.fetchSessionsList();
+      const data = await api.fetchSessionsList(activeAgent);
       setSessions(data.sessions || []);
     } catch {}
     setLoading(false);
-  };
+  }, [activeAgent]);
 
   useEffect(() => {
+    setLoading(true);
+    setExpanded(null);
+    setSessionDetail(null);
     loadSessions();
     api.fetchModels().then((d) => setModels(d.models || [])).catch(() => {});
-  }, []);
+  }, [activeAgent, loadSessions]);
 
   usePolling(loadSessions, 15000);
 
@@ -34,8 +39,8 @@ export default function SessionsPage() {
     setExpanded(id);
     try {
       const [usage, history] = await Promise.allSettled([
-        api.fetchSessionUsage(id),
-        api.fetchSessionHistory(id),
+        api.fetchSessionUsage(id, activeAgent),
+        api.fetchSessionHistory(id, activeAgent),
       ]);
       setSessionDetail({
         usage: usage.status === 'fulfilled' ? usage.value : null,
@@ -48,7 +53,7 @@ export default function SessionsPage() {
 
   const handleDelete = async (id: string) => {
     try {
-      await api.deleteSession(id);
+      await api.deleteSession(id, activeAgent);
       toast.success('Session deleted');
       setDeleteConfirm(null);
       loadSessions();
@@ -59,7 +64,7 @@ export default function SessionsPage() {
 
   const handlePatch = async (id: string, field: string, value: any) => {
     try {
-      await api.patchSession(id, { [field]: value });
+      await api.patchSession(id, { [field]: value }, activeAgent);
       toast.success('Session updated');
     } catch {
       toast.error('Failed to update session');
@@ -74,13 +79,9 @@ export default function SessionsPage() {
     const blob = new Blob([header + rows], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = 'sessions.csv'; a.click();
+    a.href = url; a.download = `sessions-${activeAgent}.csv`; a.click();
     URL.revokeObjectURL(url);
   };
-
-  if (loading) {
-    return <div className="flex items-center justify-center h-64 text-slate-400">Loading sessions...</div>;
-  }
 
   return (
     <div className="space-y-4">
@@ -99,8 +100,28 @@ export default function SessionsPage() {
         </div>
       </div>
 
-      {sessions.length === 0 ? (
-        <EmptyState message="No sessions found" />
+      {/* Agent toggle bar */}
+      <div className="flex gap-2">
+        {AGENTS.map((a) => (
+          <button
+            key={a.id}
+            onClick={() => setActiveAgent(a.id)}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+              activeAgent === a.id
+                ? 'bg-slate-700 text-white'
+                : 'bg-slate-800/50 text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+            }`}
+          >
+            <span className={`w-2 h-2 rounded-full ${a.dot}`} />
+            {a.name}
+          </button>
+        ))}
+      </div>
+
+      {loading ? (
+        <div className="flex items-center justify-center h-64 text-slate-400">Loading sessions...</div>
+      ) : sessions.length === 0 ? (
+        <EmptyState message={`No sessions found for ${AGENTS.find(a => a.id === activeAgent)?.name || activeAgent}`} />
       ) : (
         <div className="bg-slate-800/50 rounded-xl border border-slate-700/50 overflow-hidden">
           <div className="overflow-x-auto">

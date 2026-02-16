@@ -23,7 +23,7 @@ export const runJob = (id: string) => apiPost<{ status: string }>(`/api/jobs/${i
 export const fetchTokenMetrics = (days = 7) =>
   apiFetch<TokenMetricsResponse>(`/api/metrics/tokens?days=${days}`);
 export const fetchTimeseries = (metric = 'tokens', hours = 24) =>
-  apiFetch<{ data: TimeSeriesPoint[] }>(`/api/metrics/timeseries?metric=${metric}&hours=${hours}`);
+  apiFetch<{ data: TimeSeriesPoint[]; models: string[] }>(`/api/metrics/timeseries?metric=${metric}&hours=${hours}`);
 export const fetchBreakdown = () => apiFetch<MetricsBreakdown>('/api/metrics/breakdown');
 
 // System
@@ -35,12 +35,18 @@ export const fetchDevices = () => apiFetch<DeviceInfo[]>('/api/devices');
 export const fetchSessions = () => apiFetch<{ sessions: SessionInfo[] }>('/api/sessions');
 
 // Sessions management
-export const fetchSessionsList = () => apiFetch<{ sessions: any[] }>('/api/sessions/list');
-export const fetchSessionUsage = (id: string) => apiFetch<any>(`/api/sessions/${id}/usage`);
-export const patchSession = (id: string, data: any) => apiPatch<{ status: string }>(`/api/sessions/${id}`, data);
-export const deleteSession = (id: string) => apiDelete<{ status: string }>(`/api/sessions/${id}`);
-export const fetchSessionHistory = (id: string) => apiFetch<{ messages: any[] }>(`/api/sessions/${id}/history`);
-export const fetchSessionsUsageTimeseries = () => apiFetch<any>('/api/sessions/usage/timeseries');
+export const fetchSessionsList = (agent?: string) =>
+  apiFetch<{ sessions: any[] }>(`/api/sessions/list${agent ? `?agent=${agent}` : ''}`);
+export const fetchSessionUsage = (id: string, agent?: string) =>
+  apiFetch<any>(`/api/sessions/${id}/usage${agent ? `?agent=${agent}` : ''}`);
+export const patchSession = (id: string, data: any, agent?: string) =>
+  apiPatch<{ status: string }>(`/api/sessions/${id}${agent ? `?agent=${agent}` : ''}`, data);
+export const deleteSession = (id: string, agent?: string) =>
+  apiDelete<{ status: string }>(`/api/sessions/${id}${agent ? `?agent=${agent}` : ''}`);
+export const fetchSessionHistory = (id: string, agent?: string) =>
+  apiFetch<{ messages: any[] }>(`/api/sessions/${id}/history${agent ? `?agent=${agent}` : ''}`);
+export const fetchSessionsUsageTimeseries = (agent?: string) =>
+  apiFetch<any>(`/api/sessions/usage/timeseries${agent ? `?agent=${agent}` : ''}`);
 
 // Discovery
 export const fetchDiscovery = () => apiFetch<DiscoveryResult>('/api/discovery');
@@ -103,10 +109,17 @@ export const fetchProjectFile = (agent: string, path: string) =>
   apiFetch<{ name: string; content: string | null; size: number }>(`/api/projects/${agent}/file?path=${encodeURIComponent(path)}`);
 
 // Debug
-export const fetchDebugHealth = () => apiFetch<any>('/api/debug/health');
-export const fetchDebugStatus = () => apiFetch<any>('/api/debug/status');
-export const fetchDebugPresence = () => apiFetch<any>('/api/debug/presence');
-export const fetchDebugGateway = () => apiFetch<GatewayStatus>('/api/debug/gateway');
-export const fetchDebugSessions = () => apiFetch<{ sessions: any[] }>('/api/debug/sessions');
-export const fetchDebugLogs = () => apiFetch<{ lines: string[] }>('/api/debug/logs');
-export const fetchDebugFilesystem = () => apiFetch<{ checks: Record<string, any> }>('/api/debug/filesystem');
+export const fetchDebugHealth = (agent?: string) =>
+  apiFetch<any>(`/api/debug/health${agent ? `?agent=${agent}` : ''}`);
+export const fetchDebugStatus = (agent?: string) =>
+  apiFetch<any>(`/api/debug/status${agent ? `?agent=${agent}` : ''}`);
+export const fetchDebugPresence = (agent?: string) =>
+  apiFetch<any>(`/api/debug/presence${agent ? `?agent=${agent}` : ''}`);
+export const fetchDebugGateway = (agent?: string) =>
+  apiFetch<GatewayStatus>(`/api/debug/gateway${agent ? `?agent=${agent}` : ''}`);
+export const fetchDebugSessions = (agent?: string) =>
+  apiFetch<{ sessions: any[] }>(`/api/debug/sessions${agent ? `?agent=${agent}` : ''}`);
+export const fetchDebugLogs = (agent?: string) =>
+  apiFetch<{ lines: string[] }>(`/api/debug/logs${agent ? `?agent=${agent}` : ''}`);
+export const fetchDebugFilesystem = (agent?: string) =>
+  apiFetch<{ checks: Record<string, any> }>(`/api/debug/filesystem${agent ? `?agent=${agent}` : ''}`);

@@ -1,6 +1,8 @@
 """Shared Gateway RPC service — WebSocket challenge-response + RPC calls.
 
 Extracted from chat.py for reuse by cron, config, node, session, and debug routers.
+Each agent runs its own gateway on a dedicated port — the mapping lives here so
+every router can resolve agent IDs to the correct gateway.
 """
 
 import asyncio
@@ -25,6 +27,41 @@ PROTOCOL_VERSION = 3
 # Timeouts
 HANDSHAKE_TIMEOUT = 5
 RPC_TIMEOUT = 30
+
+# Agent → gateway WebSocket mapping
+AGENT_GATEWAYS: dict[str, str] = {
+    "content-specialist": "ws://127.0.0.1:8410",
+    "devops": "ws://127.0.0.1:8420",
+    "support-coordinator": "ws://127.0.0.1:8430",
+    "wealth-strategist": "ws://127.0.0.1:8440",
+}
+
+DEFAULT_AGENT = "content-specialist"
+
+
+def _load_agent_tokens() -> dict[str, str]:
+    """Load per-agent tokens from OPENCLAW_DASH_AGENT_TOKENS env var (JSON)."""
+    raw = settings.agent_tokens
+    if raw:
+        try:
+            return json.loads(raw)
+        except Exception:
+            pass
+    return {}
+
+
+def _agent_ws_url(agent: str | None) -> str:
+    """Resolve an agent ID to its gateway WebSocket URL."""
+    if agent and agent in AGENT_GATEWAYS:
+        return AGENT_GATEWAYS[agent]
+    return AGENT_GATEWAYS.get(DEFAULT_AGENT, settings.gateway_ws_url)
+
+
+def _agent_token(agent: str | None) -> str:
+    """Resolve an agent ID to its gateway auth token."""
+    agent_id = agent or DEFAULT_AGENT
+    tokens = _load_agent_tokens()
+    return tokens.get(agent_id, settings.gateway_token)
 
 
 def _req_id() -> str:
@@ -76,14 +113,17 @@ async def gateway_call(
     method: str,
     params: Optional[Dict[str, Any]] = None,
     timeout: float = RPC_TIMEOUT,
+    agent: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Open WebSocket, perform handshake, send RPC request, return response, close.
 
     Returns the full response dict. Raises on connection or timeout errors.
+    When *agent* is provided the call is routed to that agent's gateway.
     """
-    uri = settings.gateway_ws_url
+    uri = _agent_ws_url(agent) if agent else settings.gateway_ws_url
+    token = _agent_token(agent) if agent else None
     async with websockets.connect(uri, open_timeout=3, origin="http://localhost:8765") as gw:
-        if not await _handshake(gw):
+        if not await _handshake(gw, token):
             raise ConnectionError("Gateway authentication failed")
 
         req_id = _req_id()
@@ -122,11 +162,13 @@ async def gateway_call_streaming(
     method: str,
     params: Optional[Dict[str, Any]] = None,
     timeout: float = RPC_TIMEOUT,
+    agent: Optional[str] = None,
 ) -> AsyncGenerator[Dict[str, Any], None]:
     """Open WebSocket, perform handshake, send RPC request, yield events."""
-    uri = settings.gateway_ws_url
+    uri = _agent_ws_url(agent) if agent else settings.gateway_ws_url
+    token = _agent_token(agent) if agent else None
     async with websockets.connect(uri, open_timeout=3, origin="http://localhost:8765") as gw:
-        if not await _handshake(gw):
+        if not await _handshake(gw, token):
             raise ConnectionError("Gateway authentication failed")
 
         req_id = _req_id()
@@ -171,11 +213,12 @@ async def gateway_call_streaming(
                 break
 
 
-async def gateway_health_check() -> bool:
+async def gateway_health_check(agent: Optional[str] = None) -> bool:
     """Quick check if gateway WebSocket is reachable and auth works."""
     try:
-        uri = settings.gateway_ws_url
+        uri = _agent_ws_url(agent) if agent else settings.gateway_ws_url
+        token = _agent_token(agent) if agent else None
         async with websockets.connect(uri, open_timeout=2, origin="http://localhost:8765") as gw:
-            return await _handshake(gw)
+            return await _handshake(gw, token)
     except Exception:
         return False

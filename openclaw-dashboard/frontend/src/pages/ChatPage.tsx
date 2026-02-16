@@ -225,11 +225,11 @@ function ChatColumn({
             <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
               <div className={`max-w-[85%] rounded-xl px-3 py-2 ${
                 msg.role === 'user'
-                  ? 'bg-blue-600 text-white'
+                  ? 'text-white'
                   : msg.role === 'system'
                     ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
                     : `${ms.bg} border ${ms.border} text-slate-200`
-              }`}>
+              }`} style={msg.role === 'user' ? { backgroundColor: '#223d81' } : undefined}>
                 {msg.role === 'system' && (
                   <div className="text-[10px] opacity-60 mb-0.5">system</div>
                 )}
@@ -431,11 +431,11 @@ function CollectiveColumn() {
             <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
               <div className={`max-w-[85%] rounded-xl px-3 py-2 ${
                 msg.role === 'user'
-                  ? 'bg-blue-600 text-white'
+                  ? 'text-white'
                   : msg.role === 'system'
                     ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
                     : `${ms.bg} border ${ms.border} text-slate-200`
-              }`}>
+              }`} style={msg.role === 'user' ? { backgroundColor: '#223d81' } : undefined}>
                 {msg.role === 'assistant' && msg.agent && (
                   <div className={`text-[10px] font-semibold mb-0.5 ${aStyle(msg.agent).text}`}>
                     {aName(msg.agent)}
