@@ -202,6 +202,9 @@ async function callSynthetic(model, messages, maxTokens) {
   };
 }
 
+// Minimum token estimate for Anthropic prompt caching (1024 tokens ≈ 4KB text)
+const CACHE_MIN_CHARS = 4000;
+
 async function callAnthropic(model, messages, maxTokens) {
   const client = new Anthropic({
     apiKey: ANTHROPIC_API_KEY,
@@ -215,7 +218,22 @@ async function callAnthropic(model, messages, maxTokens) {
     max_tokens: maxTokens || 4096,
     messages: prepared,
   };
-  if (systemPrompt) params.system = systemPrompt;
+
+  // Prompt caching: send system prompt as a cached content block (90% savings on reads)
+  if (systemPrompt && systemPrompt.length >= CACHE_MIN_CHARS) {
+    params.system = [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }];
+  } else if (systemPrompt) {
+    params.system = systemPrompt;
+  }
+
+  // Cache conversation history: mark the second-to-last message as a cache breakpoint
+  // so all prior turns are cached across consecutive calls
+  if (prepared.length >= 2) {
+    const target = prepared[prepared.length - 2];
+    if (typeof target.content === "string" && target.content.length >= CACHE_MIN_CHARS) {
+      target.content = [{ type: "text", text: target.content, cache_control: { type: "ephemeral" } }];
+    }
+  }
 
   const response = await client.messages.create(params);
 
@@ -224,10 +242,17 @@ async function callAnthropic(model, messages, maxTokens) {
     .map(c => c.text)
     .join("");
 
+  const usage = response.usage || {};
+  const cacheRead = usage.cache_read_input_tokens || 0;
+  const cacheWrite = usage.cache_creation_input_tokens || 0;
+  if (cacheRead || cacheWrite) {
+    console.log(`[${new Date().toISOString()}] CACHE ${model} | read=${cacheRead} write=${cacheWrite} tokens`);
+  }
+
   return {
     content: text,
-    promptTokens: response.usage?.input_tokens || 0,
-    completionTokens: response.usage?.output_tokens || 0,
+    promptTokens: usage.input_tokens || 0,
+    completionTokens: usage.output_tokens || 0,
   };
 }
 
