@@ -19,7 +19,7 @@ const UPSTREAM_TIMEOUT_MS = 300_000;
 const TIER_MODELS = {
   SIMPLE:    { provider: "openai",    model: "gpt-4.1-nano" },
   MEDIUM:    { provider: "gemini",    model: "gemini-2.5-pro" },
-  COMPLEX:   { provider: "anthropic", model: "claude-sonnet-4-5-20250929" },
+  COMPLEX:   { provider: "anthropic", model: "claude-sonnet-4-6" },
   CODEX:     { provider: "openai",    model: "gpt-5.2-codex" },
   REASONING: { provider: "synthetic", model: "hf:moonshotai/Kimi-K2.5" },
   ONDEMAND:  { provider: "anthropic", model: "claude-opus-4-6" },

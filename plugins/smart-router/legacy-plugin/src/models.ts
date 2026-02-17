@@ -20,6 +20,12 @@ export const ModelRegistry = new Map<string, ModelConfig>([
     inputCost: 15.00,
     outputCost: 75.00,
   }],
+  ["anthropic/claude-sonnet-4.6", {
+    provider: "anthropic",
+    model: "claude-sonnet-4-6",
+    inputCost: 3.00,
+    outputCost: 15.00,
+  }],
   ["anthropic/claude-sonnet-4.5", {
     provider: "anthropic",
     model: "claude-sonnet-4-5-20250929",

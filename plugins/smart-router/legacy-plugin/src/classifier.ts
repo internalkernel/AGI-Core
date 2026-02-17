@@ -224,7 +224,7 @@ function getModelForTier(tier: RoutingDecision["tier"]): string {
   const tierModels = {
     SIMPLE: "local/mistral-7b",
     MEDIUM: "synthetic/kimi-2.5",
-    COMPLEX: "anthropic/claude-sonnet-4.5",
+    COMPLEX: "anthropic/claude-sonnet-4.6",
     REASONING: "synthetic/kimi-2.5",
     ONDEMAND: "anthropic/claude-opus-4.6",
   };
