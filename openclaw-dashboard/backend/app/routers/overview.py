@@ -1,12 +1,13 @@
 """Dashboard overview endpoint."""
 
+import logging
 from datetime import datetime
 from fastapi import APIRouter
 from app.models.schemas import DashboardOverview
 from app.services.job_service import get_cron_jobs_raw, get_session_count
-from app.services.cache_trace import analyze_token_usage
 
 router = APIRouter(tags=["overview"])
+logger = logging.getLogger("overview")
 
 
 @router.get("/api/overview", response_model=DashboardOverview)
@@ -18,9 +19,16 @@ async def get_overview():
     active_jobs = sum(1 for j in jobs if j.get("enabled", False))
     error_jobs = sum(1 for j in jobs if j.get("state", {}).get("lastStatus") == "error")
 
-    token_metrics = analyze_token_usage(days=1)
-    tokens_today = sum(m["input_tokens"] + m["output_tokens"] for m in token_metrics.values())
-    cost_today = sum(m["cost"] for m in token_metrics.values())
+    # Pull token usage from gateway RPC (same source as /api/metrics)
+    tokens_today = 0
+    cost_today = 0.0
+    try:
+        from app.routers.metrics import _gather_rpc_usage
+        rpc = await _gather_rpc_usage()
+        tokens_today = rpc["totals"]["totalTokens"]
+        cost_today = rpc["totals"]["totalCost"]
+    except Exception as e:
+        logger.debug("RPC usage unavailable for overview: %s", e)
 
     uptime = ((total_jobs - error_jobs) / total_jobs * 100) if total_jobs > 0 else 100.0
 
