@@ -6,6 +6,7 @@ import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, PieChart, Pie, Cell,
 } from 'recharts';
+import { AGENTS } from '../constants/agents';
 
 const MODEL_COLORS = [
   '#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981',
@@ -17,14 +18,30 @@ function colorForModel(index: number): string {
   return MODEL_COLORS[index % MODEL_COLORS.length];
 }
 
+const AGENT_COLORS: Record<string, string> = {
+  'content-specialist': '#2dd4bf',  // teal-400
+  'devops': '#818cf8',              // indigo-400
+  'support-coordinator': '#fbbf24', // amber-400
+  'wealth-strategist': '#fb7185',   // rose-400
+  'design-specialist': '#c084fc',   // purple-400
+};
+
+function colorForAgent(id: string): string {
+  return AGENT_COLORS[id] || '#94a3b8';
+}
+
 export default function MetricsPage() {
-  const { timeseries, timeseriesModels, breakdown, fetchTimeseries, fetchBreakdown } = useStore();
+  const {
+    timeseries, timeseriesModels, breakdown, fetchTimeseries, fetchBreakdown,
+    agentTimeseries, agentTimeseriesNames, fetchAgentTimeseries,
+  } = useStore();
   const [hours, setHours] = useState(168);
   const [metric, setMetric] = useState<'tokens' | 'cost'>('tokens');
 
   useEffect(() => {
     fetchTimeseries(metric, hours);
     fetchBreakdown();
+    fetchAgentTimeseries(metric, hours);
   }, [metric, hours]);
 
   const totalTokens = breakdown?.by_model?.reduce((a, b) => a + b.tokens, 0) ?? 0;
@@ -119,48 +136,94 @@ export default function MetricsPage() {
         ))}
       </div>
 
-      {/* Usage Over Time — per-model lines */}
-      <div className="bg-slate-800/50 rounded-xl p-5 border border-slate-700/50">
-        <h3 className="text-sm font-semibold text-slate-300 mb-4">
-          {metric === 'tokens' ? 'Token Usage' : 'Cost'} Over Time
-        </h3>
-        <ResponsiveContainer width="100%" height={300}>
-          <LineChart data={timeseries}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-            <XAxis dataKey="label" stroke="#94a3b8" fontSize={11} />
-            <YAxis stroke="#94a3b8" fontSize={11} />
-            <Tooltip
-              contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #475569', borderRadius: 8 }}
-              labelStyle={{ color: '#94a3b8' }}
-              itemStyle={{ fontSize: 12 }}
-            />
-            {lineModels.length > 0 ? (
-              lineModels.map((model, i) => (
-                <Line
-                  key={model}
-                  type="monotone"
-                  dataKey={model}
-                  stroke={colorForModel(i)}
-                  strokeWidth={2}
-                  dot={false}
-                  name={model}
-                />
-              ))
-            ) : (
-              <Line type="monotone" dataKey="value" stroke="#3b82f6" strokeWidth={2} dot={false} name="Total" />
-            )}
-          </LineChart>
-        </ResponsiveContainer>
-        {lineModels.length > 0 && (
-          <div className="flex flex-wrap gap-4 mt-3 justify-center">
-            {lineModels.map((model, i) => (
-              <div key={model} className="flex items-center gap-1.5 text-xs text-slate-300">
-                <div className="w-3 h-0.5 rounded" style={{ backgroundColor: colorForModel(i) }} />
-                {model}
-              </div>
-            ))}
-          </div>
-        )}
+      {/* Usage Over Time + Usage by Agent — side by side */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="bg-slate-800/50 rounded-xl p-5 border border-slate-700/50">
+          <h3 className="text-sm font-semibold text-slate-300 mb-4">
+            {metric === 'tokens' ? 'Token Usage' : 'Cost'} Over Time
+          </h3>
+          <ResponsiveContainer width="100%" height={250}>
+            <LineChart data={timeseries}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+              <XAxis dataKey="label" stroke="#94a3b8" fontSize={11} />
+              <YAxis stroke="#94a3b8" fontSize={11} />
+              <Tooltip
+                contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #475569', borderRadius: 8 }}
+                labelStyle={{ color: '#94a3b8' }}
+                itemStyle={{ fontSize: 12 }}
+              />
+              {lineModels.length > 0 ? (
+                lineModels.map((model, i) => (
+                  <Line
+                    key={model}
+                    type="monotone"
+                    dataKey={model}
+                    stroke={colorForModel(i)}
+                    strokeWidth={2}
+                    dot={false}
+                    name={model}
+                  />
+                ))
+              ) : (
+                <Line type="monotone" dataKey="value" stroke="#3b82f6" strokeWidth={2} dot={false} name="Total" />
+              )}
+            </LineChart>
+          </ResponsiveContainer>
+          {lineModels.length > 0 && (
+            <div className="flex flex-wrap gap-4 mt-3 justify-center">
+              {lineModels.map((model, i) => (
+                <div key={model} className="flex items-center gap-1.5 text-xs text-slate-300">
+                  <div className="w-3 h-0.5 rounded" style={{ backgroundColor: colorForModel(i) }} />
+                  {model}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Usage by Agent */}
+        <div className="bg-slate-800/50 rounded-xl p-5 border border-slate-700/50">
+          <h3 className="text-sm font-semibold text-slate-300 mb-4">Usage by Agent</h3>
+          <ResponsiveContainer width="100%" height={250}>
+            <LineChart data={agentTimeseries}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+              <XAxis dataKey="label" stroke="#94a3b8" fontSize={11} />
+              <YAxis stroke="#94a3b8" fontSize={11} />
+              <Tooltip
+                contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #475569', borderRadius: 8 }}
+                labelStyle={{ color: '#94a3b8' }}
+                itemStyle={{ fontSize: 12 }}
+              />
+              {agentTimeseriesNames.map((agentId) => {
+                const agent = AGENTS.find(a => a.id === agentId);
+                return (
+                  <Line
+                    key={agentId}
+                    type="monotone"
+                    dataKey={agentId}
+                    stroke={colorForAgent(agentId)}
+                    strokeWidth={2}
+                    dot={false}
+                    name={agent?.name || agentId}
+                  />
+                );
+              })}
+            </LineChart>
+          </ResponsiveContainer>
+          {agentTimeseriesNames.length > 0 && (
+            <div className="flex flex-wrap gap-4 mt-3 justify-center">
+              {agentTimeseriesNames.map((agentId) => {
+                const agent = AGENTS.find(a => a.id === agentId);
+                return (
+                  <div key={agentId} className="flex items-center gap-1.5 text-xs text-slate-300">
+                    <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: colorForAgent(agentId) }} />
+                    {agent?.name || agentId}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -228,6 +291,7 @@ export default function MetricsPage() {
           )}
         </div>
       </div>
+
     </div>
   );
 }

@@ -17,6 +17,8 @@ interface DashboardStore {
   skillsTotal: number;
   timeseries: TimeSeriesPoint[];
   timeseriesModels: string[];
+  agentTimeseries: TimeSeriesPoint[];
+  agentTimeseriesNames: string[];
   breakdown: MetricsBreakdown | null;
   chatMessages: ChatMessage[];
   logFiles: LogFile[];
@@ -36,6 +38,7 @@ interface DashboardStore {
   fetchSkills: (params?: { category?: string; search?: string; page?: number }) => Promise<void>;
   fetchSkillCategories: () => Promise<void>;
   fetchTimeseries: (metric?: string, hours?: number) => Promise<void>;
+  fetchAgentTimeseries: (metric?: string, hours?: number) => Promise<void>;
   fetchBreakdown: () => Promise<void>;
   controlJob: (jobId: string, action: string) => Promise<void>;
   addChatMessage: (msg: ChatMessage) => void;
@@ -55,6 +58,8 @@ export const useStore = create<DashboardStore>((set, get) => ({
   skillsTotal: 0,
   timeseries: [],
   timeseriesModels: [],
+  agentTimeseries: [],
+  agentTimeseriesNames: [],
   breakdown: null,
   chatMessages: [],
   logFiles: [],
@@ -130,6 +135,13 @@ export const useStore = create<DashboardStore>((set, get) => ({
     try {
       const res = await api.fetchTimeseries(metric, hours);
       set({ timeseries: res.data, timeseriesModels: res.models || [] });
+    } catch {}
+  },
+
+  fetchAgentTimeseries: async (metric = 'tokens', hours = 168) => {
+    try {
+      const res = await api.fetchAgentTimeseries(metric, hours);
+      set({ agentTimeseries: res.data, agentTimeseriesNames: res.agents || [] });
     } catch {}
   },
 

@@ -10,6 +10,7 @@ const AGENT_STYLE: Record<string, { bg: string; text: string; border: string }> 
   'devops':             { bg: 'bg-indigo-500/10', text: 'text-indigo-400', border: 'border-indigo-500/20' },
   'support-coordinator':{ bg: 'bg-amber-500/10', text: 'text-amber-400', border: 'border-amber-500/20' },
   'wealth-strategist':  { bg: 'bg-rose-500/10', text: 'text-rose-400', border: 'border-rose-500/20' },
+  'design-specialist':  { bg: 'bg-purple-500/10', text: 'text-purple-400', border: 'border-purple-500/20' },
 };
 
 const fallbackStyle = { bg: 'bg-slate-500/10', text: 'text-slate-400', border: 'border-slate-500/20' };

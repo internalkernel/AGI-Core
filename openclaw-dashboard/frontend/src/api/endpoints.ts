@@ -25,6 +25,9 @@ export const fetchTokenMetrics = (days = 7) =>
 export const fetchTimeseries = (metric = 'tokens', hours = 24) =>
   apiFetch<{ data: TimeSeriesPoint[]; models: string[] }>(`/api/metrics/timeseries?metric=${metric}&hours=${hours}`);
 export const fetchBreakdown = () => apiFetch<MetricsBreakdown>('/api/metrics/breakdown');
+export const fetchAgentTimeseries = (metric = 'tokens', hours = 168) =>
+  apiFetch<{ data: TimeSeriesPoint[]; agents: string[] }>
+    (`/api/metrics/timeseries/agents?metric=${metric}&hours=${hours}`);
 
 // System
 export const fetchSystemResources = () => apiFetch<SystemResources>('/api/system/resources');

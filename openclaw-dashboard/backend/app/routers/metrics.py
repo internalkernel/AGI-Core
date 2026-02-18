@@ -35,6 +35,8 @@ async def _gather_rpc_usage() -> dict:
     daily_model_agg: dict[str, dict] = defaultdict(lambda: {
         "tokens": 0, "cost": 0.0, "count": 0, "provider": "", "model": "",
     })
+    # Per-agent daily totals: keyed by "{date}|{agent_id}"
+    agent_daily_agg: dict[str, dict] = defaultdict(lambda: {"tokens": 0, "cost": 0.0})
     totals = {"input": 0, "output": 0, "totalTokens": 0, "totalCost": 0.0, "messages": 0}
 
     for agent_id in AGENT_GATEWAYS:
@@ -76,6 +78,10 @@ async def _gather_rpc_usage() -> dict:
                     if date:
                         daily_agg[date]["tokens"] += db.get("tokens", 0)
                         daily_agg[date]["cost"] += db.get("cost", 0)
+                        # Also track per-agent daily
+                        ak = f"{date}|{agent_id}"
+                        agent_daily_agg[ak]["tokens"] += db.get("tokens", 0)
+                        agent_daily_agg[ak]["cost"] += db.get("cost", 0)
 
                 # Daily model usage (per-model per-day)
                 for dmu in usage.get("dailyModelUsage", []):
@@ -126,10 +132,17 @@ async def _gather_rpc_usage() -> dict:
         for k, v in sorted(daily_model_agg.items())
     ]
 
+    agent_daily = [
+        {"date": k.split("|")[0], "agent": k.split("|")[1],
+         "tokens": v["tokens"], "cost": round(v["cost"], 4)}
+        for k, v in sorted(agent_daily_agg.items())
+    ]
+
     return {
         "by_model": by_model,
         "daily_trend": daily_trend,
         "daily_model": daily_model,
+        "agent_daily": agent_daily,
         "totals": totals,
     }
 
@@ -208,3 +221,32 @@ async def breakdown():
         }
 
     return get_breakdown()
+
+
+@router.get("/api/metrics/timeseries/agents")
+async def agent_timeseries(metric: str = "tokens", hours: int = Query(168, le=720)):
+    """Return per-agent daily data for time-series charts.
+
+    Response: {metric, agents: [str], data: [{label, agent_a: val, agent_b: val, ...}]}
+    """
+    rpc = await _gather_rpc_usage()
+
+    agents: set[str] = set()
+    pivot: dict[str, dict[str, float]] = defaultdict(dict)
+
+    for entry in rpc.get("agent_daily", []):
+        date = entry["date"]
+        agent = entry["agent"]
+        agents.add(agent)
+        val = entry["tokens"] if metric == "tokens" else entry["cost"]
+        pivot[date][agent] = pivot[date].get(agent, 0) + val
+
+    sorted_agents = sorted(agents)
+    data = []
+    for date in sorted(pivot.keys()):
+        point: dict = {"label": date}
+        for a in sorted_agents:
+            point[a] = pivot[date].get(a, 0)
+        data.append(point)
+
+    return {"metric": metric, "agents": sorted_agents, "data": data}

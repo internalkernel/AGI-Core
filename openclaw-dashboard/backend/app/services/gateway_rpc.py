@@ -34,6 +34,7 @@ AGENT_GATEWAYS: dict[str, str] = {
     "devops": "ws://127.0.0.1:8420",
     "support-coordinator": "ws://127.0.0.1:8430",
     "wealth-strategist": "ws://127.0.0.1:8440",
+    "design-specialist": "ws://127.0.0.1:8450",
 }
 
 DEFAULT_AGENT = "content-specialist"

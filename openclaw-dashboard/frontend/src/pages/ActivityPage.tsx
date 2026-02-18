@@ -22,6 +22,7 @@ export default function ActivityPage() {
   const [filter, setFilter] = useState<string>('all');
   const [agentFilter, setAgentFilter] = useState<string>('all');
   const [columns, setColumns] = useState<number>(getStoredColumns);
+  const [columnAgents, setColumnAgents] = useState<string[]>(() => AGENTS.map(a => a.id));
 
   useEffect(() => {
     fetchActivityStats().then(setStats).catch(() => {});
@@ -125,19 +126,38 @@ export default function ActivityPage() {
           className="gap-4"
           style={{ display: 'grid', gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}
         >
-          {AGENTS.slice(0, columns).map((agent) => (
-            <div key={agent.id} className="min-w-0">
-              <div className="flex items-center gap-2 mb-3 px-1">
-                <span className={`w-2.5 h-2.5 rounded-full ${agent.dot}`} />
-                <span className="text-sm font-medium text-white">{agent.name}</span>
+          {Array.from({ length: columns }, (_, i) => {
+            const agentId = columnAgents[i] || AGENTS[i % AGENTS.length].id;
+            return (
+              <div key={`col-${i}-${agentId}`} className="min-w-0">
+                <div className="flex gap-1 flex-wrap mb-3">
+                  {AGENTS.map(a => (
+                    <button
+                      key={a.id}
+                      onClick={() => setColumnAgents(prev => {
+                        const next = [...prev];
+                        next[i] = a.id;
+                        return next;
+                      })}
+                      className={`flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs font-medium transition-colors ${
+                        a.id === agentId
+                          ? 'bg-blue-600/20 text-blue-400 border border-blue-500/30'
+                          : 'text-slate-500 hover:text-slate-300 border border-transparent'
+                      }`}
+                    >
+                      <span className={`w-2 h-2 rounded-full ${a.dot}`} />
+                      <span className="truncate">{a.name}</span>
+                    </button>
+                  ))}
+                </div>
+                <ActivityFeed
+                  entityType="agent"
+                  agentId={agentId}
+                  limit={30}
+                />
               </div>
-              <ActivityFeed
-                entityType="agent"
-                agentId={agent.id}
-                limit={30}
-              />
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

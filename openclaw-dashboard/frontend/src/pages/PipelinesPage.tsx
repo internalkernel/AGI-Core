@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState } from 'react';
 import {
   FolderOpen, File, FileText, ChevronRight, ChevronDown, X,
   LayoutGrid, Columns2, Columns3, Columns4,
@@ -25,16 +25,6 @@ function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function formatDate(iso: string | null): string {
-  if (!iso) return '';
-  try {
-    const d = new Date(iso);
-    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-  } catch {
-    return '';
-  }
 }
 
 // Lightweight markdown renderer
@@ -177,72 +167,106 @@ function PathTreeNode({ node, parentPath, depth, agentId, onFileClick, selectedP
   );
 }
 
-export default function PipelinesPage() {
-  const [columns, setColumns] = useState<number>(getStoredColumns);
-  const [activeAgent, setActiveAgent] = useState(AGENTS[0].id);
+function ProjectColumn({ agentId }: { agentId: string }) {
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedProject, setExpandedProject] = useState<string | null>(null);
   const [tree, setTree] = useState<FileNode | null>(null);
   const [treeLoading, setTreeLoading] = useState(false);
   const [previewContent, setPreviewContent] = useState<string | null>(null);
-  const [previewName, setPreviewName] = useState<string>('');
+  const [previewName, setPreviewName] = useState('');
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
 
-  const loadProjects = useCallback(async (agent: string) => {
+  useEffect(() => {
     setLoading(true);
     setExpandedProject(null);
     setTree(null);
     setPreviewContent(null);
     setSelectedPath(null);
-    try {
-      const data = await fetchProjects(agent);
-      setProjects(data.projects);
-    } catch {
-      setProjects([]);
-    }
-    setLoading(false);
-  }, []);
+    fetchProjects(agentId)
+      .then(data => setProjects(data.projects))
+      .catch(() => setProjects([]))
+      .finally(() => setLoading(false));
+  }, [agentId]);
 
-  useEffect(() => { loadProjects(activeAgent); }, [activeAgent, loadProjects]);
-
-  function handleColumnsChange(n: number) {
-    setColumns(n);
-    localStorage.setItem('pipelines-columns', String(n));
-  }
-
-  async function handleExpandProject(projectName: string) {
+  async function handleExpand(projectName: string) {
     if (expandedProject === projectName) {
-      setExpandedProject(null);
-      setTree(null);
-      setPreviewContent(null);
-      setSelectedPath(null);
+      setExpandedProject(null); setTree(null); setPreviewContent(null); setSelectedPath(null);
       return;
     }
-    setExpandedProject(projectName);
-    setPreviewContent(null);
-    setSelectedPath(null);
-    setTreeLoading(true);
-    try {
-      const data = await fetchProjectTree(activeAgent, projectName);
-      setTree(data);
-    } catch {
-      setTree(null);
-    }
+    setExpandedProject(projectName); setPreviewContent(null); setSelectedPath(null); setTreeLoading(true);
+    try { setTree(await fetchProjectTree(agentId, projectName)); } catch { setTree(null); }
     setTreeLoading(false);
   }
 
   async function handleFileClick(filePath: string) {
     setSelectedPath(filePath);
     try {
-      const data = await fetchProjectFile(activeAgent, filePath);
-      if (data.content) {
-        setPreviewContent(data.content);
-        setPreviewName(data.name);
-      }
-    } catch {
-      setPreviewContent(null);
-    }
+      const data = await fetchProjectFile(agentId, filePath);
+      if (data.content) { setPreviewContent(data.content); setPreviewName(data.name); }
+    } catch { setPreviewContent(null); }
+  }
+
+  if (loading) return <div className="text-sm text-slate-500 text-center py-8">Loading...</div>;
+  if (projects.length === 0) return (
+    <EmptyState message="No projects yet" description="No project folders for this agent." icon={FolderOpen} />
+  );
+
+  return (
+    <div className="space-y-3">
+      {projects.map((p) => (
+        <div key={p.name}>
+          <button
+            onClick={() => handleExpand(p.name)}
+            className={`w-full bg-slate-800/50 rounded-xl p-3 border text-left transition-colors ${
+              expandedProject === p.name ? 'border-blue-500/50 bg-slate-800/80' : 'border-slate-700/50 hover:border-slate-600'
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <FolderOpen size={16} className="shrink-0 text-amber-400" />
+              <span className="text-sm text-white font-semibold truncate">{p.name}</span>
+              <span className="text-xs text-slate-500 ml-auto shrink-0">{p.file_count} file{p.file_count !== 1 ? 's' : ''}</span>
+              <ChevronRight size={14} className={`text-slate-500 transition-transform shrink-0 ${expandedProject === p.name ? 'rotate-90' : ''}`} />
+            </div>
+          </button>
+          {expandedProject === p.name && (
+            <div className="mt-2 bg-slate-800/30 rounded-lg border border-slate-700/50 overflow-hidden">
+              {treeLoading ? (
+                <div className="text-xs text-slate-500 text-center py-4">Loading...</div>
+              ) : !tree ? (
+                <div className="text-xs text-slate-500 text-center py-4">Failed to load</div>
+              ) : (
+                <div className="flex flex-col divide-y divide-slate-700/50">
+                  <div className="overflow-y-auto py-1" style={{ maxHeight: '250px' }}>
+                    <TreeWithPaths tree={tree} agentId={agentId} projectName={expandedProject} onFileClick={handleFileClick} selectedPath={selectedPath} />
+                  </div>
+                  {previewContent && (
+                    <div className="overflow-y-auto p-3" style={{ maxHeight: '250px' }}>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs text-slate-400 font-medium">{previewName}</span>
+                        <button onClick={() => { setPreviewContent(null); setSelectedPath(null); }} className="text-slate-500 hover:text-white p-0.5"><X size={12} /></button>
+                      </div>
+                      <div className="prose-custom text-sm" dangerouslySetInnerHTML={{ __html: renderMarkdown(previewContent) }} />
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export default function PipelinesPage() {
+  const [columns, setColumns] = useState<number>(getStoredColumns);
+  const [activeAgent, setActiveAgent] = useState(AGENTS[0].id);
+  const [columnAgents, setColumnAgents] = useState<string[]>(() => AGENTS.map(a => a.id));
+
+  function handleColumnsChange(n: number) {
+    setColumns(n);
+    localStorage.setItem('pipelines-columns', String(n));
   }
 
   return (
@@ -271,116 +295,58 @@ export default function PipelinesPage() {
         </div>
       </div>
 
-      {/* Agent toggle bar */}
-      <div className="flex gap-2 flex-wrap">
-        {AGENTS.map((agent) => (
-          <button
-            key={agent.id}
-            onClick={() => setActiveAgent(agent.id)}
-            className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors flex items-center gap-1.5 ${
-              activeAgent === agent.id
-                ? 'bg-blue-600/20 text-blue-400 border border-blue-500/30'
-                : 'bg-slate-800 text-slate-400 border border-slate-700/50 hover:text-white'
-            }`}
-          >
-            <span className={`w-2 h-2 rounded-full ${agent.dot}`} />
-            {agent.name}
-          </button>
-        ))}
-      </div>
-
-      {/* Content */}
-      {loading ? (
-        <div className="text-sm text-slate-500 text-center py-16">Loading projects...</div>
-      ) : projects.length === 0 ? (
-        <EmptyState
-          message="No projects yet"
-          description="This agent hasn't created any project folders yet. Projects will appear here as the agent organizes task outputs."
-          icon={FolderOpen}
-        />
-      ) : (
+      {columns === 1 ? (
         <>
-          {/* Project cards grid */}
-          <div
-            className="gap-4"
-            style={{ display: 'grid', gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}
-          >
-            {projects.map((p) => (
+          {/* Single column: shared agent bar */}
+          <div className="flex gap-2 flex-wrap">
+            {AGENTS.map((agent) => (
               <button
-                key={p.name}
-                onClick={() => handleExpandProject(p.name)}
-                className={`bg-slate-800/50 rounded-xl p-4 border text-left transition-colors ${
-                  expandedProject === p.name
-                    ? 'border-blue-500/50 bg-slate-800/80'
-                    : 'border-slate-700/50 hover:border-slate-600'
+                key={agent.id}
+                onClick={() => setActiveAgent(agent.id)}
+                className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors flex items-center gap-1.5 ${
+                  activeAgent === agent.id
+                    ? 'bg-blue-600/20 text-blue-400 border border-blue-500/30'
+                    : 'bg-slate-800 text-slate-400 border border-slate-700/50 hover:text-white'
                 }`}
               >
-                <div className="flex items-center gap-3">
-                  <div className="p-2 rounded-lg bg-amber-500/10 text-amber-400">
-                    <FolderOpen size={20} />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <h3 className="text-white font-semibold truncate">{p.name}</h3>
-                    <div className="flex items-center gap-3 text-xs text-slate-400 mt-0.5">
-                      <span>{p.file_count} file{p.file_count !== 1 ? 's' : ''}</span>
-                      {p.last_modified && <span>{formatDate(p.last_modified)}</span>}
-                    </div>
-                  </div>
-                  <ChevronRight size={16} className={`text-slate-500 transition-transform ${expandedProject === p.name ? 'rotate-90' : ''}`} />
-                </div>
+                <span className={`w-2 h-2 rounded-full ${agent.dot}`} />
+                {agent.name}
               </button>
             ))}
           </div>
-
-          {/* Expanded project view */}
-          {expandedProject && (
-            <div className="bg-slate-800/50 rounded-xl border border-slate-700/50 overflow-hidden">
-              <div className="flex items-center gap-2 px-4 py-3 border-b border-slate-700/50">
-                <FolderOpen size={16} className="text-amber-400" />
-                <span className="text-sm font-medium text-white">{expandedProject}</span>
-                <button onClick={() => { setExpandedProject(null); setTree(null); setPreviewContent(null); setSelectedPath(null); }} className="ml-auto text-slate-400 hover:text-white p-1">
-                  <X size={14} />
-                </button>
-              </div>
-              {treeLoading ? (
-                <div className="text-sm text-slate-500 text-center py-8">Loading file tree...</div>
-              ) : !tree ? (
-                <div className="text-sm text-slate-500 text-center py-8">Failed to load file tree</div>
-              ) : (
-                <div className="flex divide-x divide-slate-700/50" style={{ minHeight: '300px' }}>
-                  {/* File tree */}
-                  <div className={`overflow-y-auto py-2 ${previewContent ? 'w-1/4' : 'w-full'}`} style={{ maxHeight: '500px' }}>
-                    <TreeWithPaths
-                      tree={tree}
-                      agentId={activeAgent}
-                      projectName={expandedProject}
-                      onFileClick={handleFileClick}
-                      selectedPath={selectedPath}
-                    />
-                  </div>
-                  {/* Preview pane */}
-                  {previewContent && (
-                    <div className="flex-1 overflow-y-auto p-4" style={{ maxHeight: '500px' }}>
-                      <div className="flex items-center justify-between mb-3">
-                        <span className="text-xs text-slate-400 font-medium">{previewName}</span>
-                        <button
-                          onClick={() => { setPreviewContent(null); setSelectedPath(null); }}
-                          className="text-slate-500 hover:text-white p-1"
-                        >
-                          <X size={12} />
-                        </button>
-                      </div>
-                      <div
-                        className="prose-custom"
-                        dangerouslySetInnerHTML={{ __html: renderMarkdown(previewContent) }}
-                      />
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
+          <ProjectColumn agentId={activeAgent} />
         </>
+      ) : (
+        <div className="gap-4" style={{ display: 'grid', gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}>
+          {Array.from({ length: columns }, (_, i) => {
+            const agentId = columnAgents[i] || AGENTS[i % AGENTS.length].id;
+            return (
+              <div key={`col-${i}-${agentId}`} className="min-w-0">
+                <div className="flex gap-1 flex-wrap mb-3">
+                  {AGENTS.map(a => (
+                    <button
+                      key={a.id}
+                      onClick={() => setColumnAgents(prev => {
+                        const next = [...prev];
+                        next[i] = a.id;
+                        return next;
+                      })}
+                      className={`flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs font-medium transition-colors ${
+                        a.id === agentId
+                          ? 'bg-blue-600/20 text-blue-400 border border-blue-500/30'
+                          : 'text-slate-500 hover:text-slate-300 border border-transparent'
+                      }`}
+                    >
+                      <span className={`w-2 h-2 rounded-full ${a.dot}`} />
+                      <span className="truncate">{a.name}</span>
+                    </button>
+                  ))}
+                </div>
+                <ProjectColumn agentId={agentId} />
+              </div>
+            );
+          })}
+        </div>
       )}
     </div>
   );
