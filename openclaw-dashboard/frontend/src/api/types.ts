@@ -143,6 +143,8 @@ export interface SkillInfo {
   has_readme: boolean;
   description: string;
   readme?: string;
+  on_demand?: boolean;
+  agents?: Record<string, 'enabled' | 'disabled' | 'on-demand'>;
 }
 
 export interface SkillCategory {

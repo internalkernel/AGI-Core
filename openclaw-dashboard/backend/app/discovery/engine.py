@@ -354,12 +354,62 @@ def _discover_agents_from_sessions(agents: List[Dict], seen: set):
 # Skill Discovery
 # ---------------------------------------------------------------------------
 
+def _parse_skill_frontmatter(skill_dir: Path) -> dict:
+    """Parse SKILL.md YAML frontmatter for metadata like disable-model-invocation."""
+    skill_md = skill_dir / "SKILL.md"
+    if not skill_md.exists():
+        return {}
+    try:
+        text = skill_md.read_text(encoding="utf-8")[:2000]
+        if not text.startswith("---"):
+            return {}
+        end = text.index("---", 3)
+        block = text[3:end]
+        meta = {}
+        for line in block.strip().split("\n"):
+            if ":" in line:
+                key, val = line.split(":", 1)
+                val = val.strip()
+                if val.lower() in ("true", "yes"):
+                    val = True
+                elif val.lower() in ("false", "no"):
+                    val = False
+                meta[key.strip()] = val
+        return meta
+    except Exception:
+        return {}
+
+
+def _load_workspace_skill_configs() -> Dict[str, Dict[str, dict]]:
+    """Load skills.entries from each workspace openclaw.json.
+
+    Returns {workspace_label: {skill_name: {enabled: bool, ...}}}
+    """
+    result: Dict[str, Dict[str, dict]] = {}
+    for ws in get_all_workspaces():
+        if ws == WORKSPACE:
+            continue
+        label = ws.name.replace("workspace-", "")
+        oc = ws / "openclaw.json"
+        if not oc.exists():
+            result[label] = {}
+            continue
+        try:
+            data = json.loads(oc.read_text())
+            result[label] = data.get("skills", {}).get("entries", {})
+        except Exception:
+            result[label] = {}
+    return result
+
+
 def discover_skills() -> List[Dict]:
     # Skills are installed at the root level, not inside any workspace
     skills_dir = settings.openclaw_dir / "skills"
     skills = []
     if not skills_dir.exists():
         return skills
+
+    ws_configs = _load_workspace_skill_configs()
 
     try:
         for entry in sorted(skills_dir.iterdir()):
@@ -378,12 +428,28 @@ def discover_skills() -> List[Dict]:
                     except Exception:
                         pass
 
+                fm = _parse_skill_frontmatter(entry)
+                on_demand = fm.get("disable-model-invocation", False) is True
+
+                # Build per-agent enablement list
+                agents = {}
+                for agent_label, entries in ws_configs.items():
+                    cfg = entries.get(entry.name, {})
+                    if cfg.get("enabled") is False:
+                        agents[agent_label] = "disabled"
+                    elif on_demand:
+                        agents[agent_label] = "on-demand"
+                    else:
+                        agents[agent_label] = "enabled"
+
                 skills.append({
                     "name": entry.name,
                     "path": str(entry),
                     "category": _categorize_skill(entry.name),
                     "has_readme": readme.exists(),
                     "description": desc,
+                    "on_demand": on_demand,
+                    "agents": agents,
                 })
     except Exception:
         pass

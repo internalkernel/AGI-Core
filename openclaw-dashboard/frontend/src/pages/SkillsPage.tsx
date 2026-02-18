@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useStore } from '../store';
+import { AGENTS } from '../constants/agents';
 import EmptyState from '../components/common/EmptyState';
 import { Search, Wrench, ChevronRight } from 'lucide-react';
 
@@ -10,6 +11,7 @@ export default function SkillsPage() {
   const [page, setPage] = useState(1);
   const [selectedSkill, setSelectedSkill] = useState<string | null>(null);
   const [readme, setReadme] = useState('');
+  const [detailSkill, setDetailSkill] = useState<typeof skills[0] | null>(null);
 
   useEffect(() => {
     fetchSkillCategories();
@@ -27,6 +29,7 @@ export default function SkillsPage() {
 
   const loadSkillDetail = async (name: string) => {
     setSelectedSkill(name);
+    setDetailSkill(skills.find(s => s.name === name) || null);
     try {
       const res = await fetch(`/api/skills/${name}`);
       const data = await res.json();
@@ -79,7 +82,29 @@ export default function SkillsPage() {
                 Back to list
               </button>
               <div className="bg-slate-800/50 rounded-xl p-6 border border-slate-700/50">
-                <h2 className="text-xl font-bold text-white mb-4">{selectedSkill}</h2>
+                <div className="flex items-center gap-3 mb-4">
+                  <h2 className="text-xl font-bold text-white">{selectedSkill}</h2>
+                  {detailSkill?.on_demand && (
+                    <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                      on-demand
+                    </span>
+                  )}
+                </div>
+                {detailSkill?.agents && (
+                  <div className="flex items-center gap-3 mb-4">
+                    <span className="text-xs text-slate-500">Agents:</span>
+                    {AGENTS.map(a => {
+                      const status = detailSkill.agents?.[a.id];
+                      if (status === 'disabled') return null;
+                      return (
+                        <div key={a.id} className="flex items-center gap-1.5" title={`${a.name}: ${status}`}>
+                          <span className={`w-2 h-2 rounded-full ${a.dot}`} />
+                          <span className="text-xs text-slate-300">{a.name}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
                 <pre className="text-sm text-slate-300 whitespace-pre-wrap font-mono">{readme}</pre>
               </div>
             </div>
@@ -97,10 +122,30 @@ export default function SkillsPage() {
                     <div className="flex items-center gap-2">
                       <Wrench size={14} className="text-slate-400" />
                       <span className="text-sm font-medium text-white">{s.name}</span>
-                      <ChevronRight size={14} className="ml-auto text-slate-600 group-hover:text-blue-400" />
+                      {s.on_demand && (
+                        <span className="px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 leading-none">
+                          on-demand
+                        </span>
+                      )}
+                      <ChevronRight size={14} className="ml-auto text-slate-600 group-hover:text-blue-400 shrink-0" />
                     </div>
                     <div className="text-xs text-slate-500 mt-1 capitalize">{s.category}</div>
                     {s.description && <div className="text-xs text-slate-400 mt-1 line-clamp-2">{s.description}</div>}
+                    {s.agents && (
+                      <div className="flex items-center gap-1.5 mt-2">
+                        {AGENTS.map(a => {
+                          const status = s.agents?.[a.id];
+                          if (status === 'disabled') return null;
+                          return (
+                            <span
+                              key={a.id}
+                              title={`${a.name}: ${status}`}
+                              className={`w-2 h-2 rounded-full ${a.dot} ${status === 'on-demand' ? 'opacity-50' : ''}`}
+                            />
+                          );
+                        })}
+                      </div>
+                    )}
                   </button>
                 ))}
               </div>
