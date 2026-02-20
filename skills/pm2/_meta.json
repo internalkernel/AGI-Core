@@ -1,0 +1,6 @@
+{
+  "slug": "pm2",
+  "name": "PM2 Manager",
+  "version": "1.0.0",
+  "description": "PM2 process manager wrapper for agents. List, start, stop, restart, describe, and tail logs for PM2-managed processes. All output is JSON to stdout; status/errors to stderr."
+}
