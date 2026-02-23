@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     admin_password: str = "changeme"
     jwt_algorithm: str = "HS256"
     jwt_expire_hours: int = 24
+    enable_docs: bool = False  # Set OPENCLAW_DASH_ENABLE_DOCS=true to expose /docs
 
     model_config = {
         "env_prefix": "OPENCLAW_DASH_",

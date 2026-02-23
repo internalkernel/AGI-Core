@@ -70,7 +70,8 @@ app = FastAPI(
     title="OpenClaw Dashboard",
     version="2.0.0",
     lifespan=lifespan,
-    docs_url="/docs",
+    docs_url="/docs" if settings.enable_docs else None,
+    openapi_url="/openapi.json" if settings.enable_docs else None,
     redoc_url=None,
 )
 
@@ -93,7 +94,7 @@ app.add_middleware(
 )
 
 # Auth-exempt paths
-AUTH_EXEMPT = {"/api/auth/login", "/api/system/health", "/api/webhook/activity", "/docs", "/openapi.json"}
+AUTH_EXEMPT = {"/api/auth/login", "/api/system/health", "/api/webhook/activity"}
 AUTH_EXEMPT_PREFIXES = ("/assets/",)
 
 

@@ -16,7 +16,7 @@ router = APIRouter(tags=["discovery"])
 
 
 @router.get("/api/discovery")
-async def full_discovery():
+async def full_discovery(_admin: User = Depends(require_admin)):
     result = get_cached_result()
     if not result:
         result = run_discovery()
@@ -24,7 +24,7 @@ async def full_discovery():
 
 
 @router.post("/api/discovery/refresh")
-async def refresh_discovery():
+async def refresh_discovery(_admin: User = Depends(require_admin)):
     result = run_discovery()
     return {"status": "refreshed", "metrics": result.get("metrics", {})}
 

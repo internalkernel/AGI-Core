@@ -12,7 +12,7 @@ router = APIRouter(tags=["nodes"])
 
 
 @router.get("/api/nodes")
-async def list_nodes():
+async def list_nodes(_admin: User = Depends(require_admin)):
     """List connected nodes via gateway RPC."""
     try:
         result = await gateway_call("node.list")
@@ -24,7 +24,7 @@ async def list_nodes():
 
 
 @router.get("/api/nodes/devices")
-async def list_devices():
+async def list_devices(_admin: User = Depends(require_admin)):
     """List paired devices — tries RPC, falls back to file."""
     try:
         result = await gateway_call("device.pair.list")

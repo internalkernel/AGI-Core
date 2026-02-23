@@ -4,11 +4,13 @@ import psutil
 import time
 from datetime import datetime
 from typing import List
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 from app.config import settings
 from app.models.schemas import SystemResources, DeviceInfo
 from app.services.job_service import get_session_count, get_devices
+from app.services.auth import require_admin
+from app.models.database import User
 
 router = APIRouter(tags=["system"])
 
@@ -54,7 +56,7 @@ async def system_health():
 
 
 @router.get("/api/devices", response_model=List[DeviceInfo])
-async def list_devices():
+async def list_devices(_admin: User = Depends(require_admin)):
     return get_devices()
 
 

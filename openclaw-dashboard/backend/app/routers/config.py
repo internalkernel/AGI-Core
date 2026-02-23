@@ -57,7 +57,7 @@ def _redact_list(items: list, prefix: str) -> list:
 
 
 @router.get("/api/config")
-async def get_config():
+async def get_config(_admin: User = Depends(require_admin)):
     """Get current config — tries RPC first, falls back to file."""
     try:
         result = await gateway_call("config.get")
@@ -77,7 +77,7 @@ async def get_config():
 
 
 @router.get("/api/config/schema")
-async def get_config_schema():
+async def get_config_schema(_admin: User = Depends(require_admin)):
     """Get config schema via RPC."""
     try:
         result = await gateway_call("config.schema")
@@ -138,7 +138,7 @@ async def apply_config(_admin: User = Depends(require_admin)):
 
 
 @router.get("/api/config/models")
-async def list_models():
+async def list_models(_admin: User = Depends(require_admin)):
     """Get available models via gateway RPC."""
     try:
         result = await gateway_call("models.list")
@@ -150,7 +150,7 @@ async def list_models():
 
 
 @router.get("/api/models")
-async def list_models_alt():
+async def list_models_alt(_admin: User = Depends(require_admin)):
     """Alias for /api/config/models — available models."""
     try:
         result = await gateway_call("models.list")

@@ -76,13 +76,13 @@ def _write_channels(channels: List[Dict[str, Any]]):
 
 
 @router.get("/api/channels")
-async def list_channels():
+async def list_channels(_admin: User = Depends(require_admin)):
     channels = _read_channels()
     return {"channels": channels, "total": len(channels)}
 
 
 @router.get("/api/channels/{channel_id}")
-async def get_channel(channel_id: str):
+async def get_channel(channel_id: str, _admin: User = Depends(require_admin)):
     channels = _read_channels()
     for ch in channels:
         if ch["id"] == channel_id:

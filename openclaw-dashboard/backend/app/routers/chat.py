@@ -6,6 +6,7 @@ maps agent IDs to their gateway URLs and proxies WebSocket connections.
 
 import asyncio
 import json
+import time
 import uuid
 
 import httpx
@@ -24,6 +25,20 @@ from app.services.gateway_rpc import (
 )
 
 router = APIRouter(tags=["chat"])
+
+# Per-connection chat rate limit
+_CHAT_MSGS_PER_MINUTE = 30
+
+
+def _check_chat_rate(timestamps: list[float]) -> bool:
+    """Return True if within rate limit, mutating timestamps in-place."""
+    now = time.time()
+    cutoff = now - 60
+    timestamps[:] = [t for t in timestamps if t > cutoff]
+    if len(timestamps) >= _CHAT_MSGS_PER_MINUTE:
+        return False
+    timestamps.append(now)
+    return True
 
 
 def _gateway_http_url(agent: str | None) -> str:
@@ -258,11 +273,15 @@ async def websocket_collective_chat(websocket: WebSocket):
 
     # --- client → gateway router ---
     async def client_listener():
+        rate_ts: list[float] = []
         try:
             while True:
                 raw = await websocket.receive_text()
                 if len(raw) > MAX_MSG_SIZE:
                     await websocket.send_json({"type": "error", "error": "Message too large"})
+                    continue
+                if not _check_chat_rate(rate_ts):
+                    await websocket.send_json({"type": "error", "error": "Rate limit exceeded"})
                     continue
                 data = json.loads(raw)
                 content = data.get("content", data.get("message", ""))
@@ -390,11 +409,15 @@ async def websocket_chat(websocket: WebSocket, agent: str | None = None):
 
             async def client_to_gateway():
                 MAX_MSG_SIZE = 32_768  # 32KB
+                rate_ts: list[float] = []
                 try:
                     while True:
                         raw = await websocket.receive_text()
                         if len(raw) > MAX_MSG_SIZE:
                             await websocket.send_json({"type": "error", "error": "Message too large"})
+                            continue
+                        if not _check_chat_rate(rate_ts):
+                            await websocket.send_json({"type": "error", "error": "Rate limit exceeded"})
                             continue
                         data = json.loads(raw)
                         message = data.get("content", data.get("message", ""))

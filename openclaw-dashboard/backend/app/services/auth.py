@@ -41,6 +41,20 @@ def decode_token(token: str) -> Optional[str]:
         return None
 
 
+def _ws_allowed_origins() -> set[str]:
+    """Build the set of allowed WebSocket origins from settings."""
+    origins = {"http://localhost:8765", "http://127.0.0.1:8765", "https://localhost:8765"}
+    host = settings.host
+    if host and host != "0.0.0.0":
+        origins.add(f"http://{host}:8765")
+        origins.add(f"https://{host}:8765")
+    for o in settings.allowed_origins.split(","):
+        o = o.strip()
+        if o:
+            origins.add(o)
+    return origins
+
+
 async def authenticate_websocket(websocket: WebSocket) -> Optional[str]:
     """Validate JWT on a WebSocket handshake and accept or reject.
 
@@ -48,6 +62,12 @@ async def authenticate_websocket(websocket: WebSocket) -> Optional[str]:
     user-id string on success (after accepting the connection) or *None*
     after closing the socket with 1008 (Policy Violation).
     """
+    # Origin validation (CSWSH protection)
+    origin = websocket.headers.get("origin", "")
+    if origin and origin not in _ws_allowed_origins():
+        await websocket.close(code=1008, reason="Origin not allowed")
+        return None
+
     from app.db.connection import async_session_factory
     token = websocket.query_params.get("token")
     if token:
