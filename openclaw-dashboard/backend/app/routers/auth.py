@@ -16,6 +16,9 @@ from app.services.auth import (
     verify_password, hash_password, create_access_token, get_current_user,
 )
 
+# Pre-hashed dummy for constant-time login timing (prevents username enumeration)
+_DUMMY_HASH = hash_password("__dummy_timing_constant__")
+
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 MAX_ATTEMPTS = 3
@@ -83,7 +86,9 @@ async def login(body: LoginRequest, request: Request, session: AsyncSession = De
 
     result = await session.execute(select(User).where(User.username == body.username))
     user = result.scalar_one_or_none()
-    if user is None or not verify_password(body.password, user.hashed_password):
+    # Always run bcrypt to prevent timing-based username enumeration
+    valid = verify_password(body.password, user.hashed_password if user else _DUMMY_HASH) and user is not None
+    if not valid:
         # Record failed attempt (Redis or in-memory)
         if redis:
             key = f"{_FAIL_PREFIX}{ip}"

@@ -54,16 +54,18 @@ def _safe_resolve(base: Path, relative: str) -> Path:
     return resolved
 
 
-def _build_tree(path: Path, depth: int = 0, counter: list | None = None) -> dict:
+def _build_tree(path: Path, depth: int = 0, counter: list | None = None, root: Path | None = None) -> dict:
     if counter is None:
         counter = [0]
+    if root is None:
+        root = path.resolve()
     name = path.name
     if path.is_file():
         counter[0] += 1
         return {
             "name": name,
             "type": "file",
-            "size": path.stat().st_size,
+            "size": path.lstat().st_size,
             "is_markdown": name.lower().endswith(".md"),
         }
     children = []
@@ -75,9 +77,18 @@ def _build_tree(path: Path, depth: int = 0, counter: list | None = None) -> dict
         for entry in entries:
             if entry.name.startswith("."):
                 continue
+            # Skip symlinks to prevent traversal outside project root
+            if entry.is_symlink():
+                continue
+            # Verify entry stays within project root
+            try:
+                if not entry.resolve().is_relative_to(root):
+                    continue
+            except (OSError, ValueError):
+                continue
             if counter[0] >= MAX_ENTRIES:
                 break
-            children.append(_build_tree(entry, depth + 1, counter))
+            children.append(_build_tree(entry, depth + 1, counter, root))
     return {"name": name, "type": "directory", "children": children}
 
 
@@ -94,11 +105,11 @@ async def list_projects(agent: str = Query(..., description="Agent ID"), _admin:
         return {"agent": agent, "projects": []}
 
     for entry in entries:
-        if not entry.is_dir() or entry.name.startswith("."):
+        if not entry.is_dir() or entry.name.startswith(".") or entry.is_symlink():
             continue
         file_count = 0
         last_mod = 0.0
-        for root, dirs, files in os.walk(entry):
+        for root, dirs, files in os.walk(entry, followlinks=False):
             dirs[:] = [d for d in dirs if not d.startswith(".")]
             for f in files:
                 if not f.startswith("."):
