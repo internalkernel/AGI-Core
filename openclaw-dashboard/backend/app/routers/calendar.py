@@ -51,9 +51,15 @@ async def list_events(
 ):
     import calendar as cal_mod
     now = datetime.now(timezone.utc)
-    start_dt = datetime.fromisoformat(start) if start else now.replace(day=1, hour=0, minute=0, second=0)
+    try:
+        start_dt = datetime.fromisoformat(start) if start else now.replace(day=1, hour=0, minute=0, second=0)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid 'start' datetime format")
     if end:
-        end_dt = datetime.fromisoformat(end)
+        try:
+            end_dt = datetime.fromisoformat(end)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="Invalid 'end' datetime format")
     else:
         # Compute last day of the current month
         last_day = cal_mod.monthrange(now.year, now.month)[1]

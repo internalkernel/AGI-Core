@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
@@ -34,9 +34,15 @@ async def list_activities(
     if event_type:
         stmt = stmt.where(Activity.event_type == event_type)
     if since:
-        stmt = stmt.where(Activity.timestamp >= datetime.fromisoformat(since))
+        try:
+            stmt = stmt.where(Activity.timestamp >= datetime.fromisoformat(since))
+        except ValueError:
+            raise HTTPException(status_code=422, detail="Invalid 'since' datetime format")
     if until:
-        stmt = stmt.where(Activity.timestamp <= datetime.fromisoformat(until))
+        try:
+            stmt = stmt.where(Activity.timestamp <= datetime.fromisoformat(until))
+        except ValueError:
+            raise HTTPException(status_code=422, detail="Invalid 'until' datetime format")
     stmt = stmt.offset(offset).limit(limit)
     result = await session.execute(stmt)
     activities = result.scalars().all()

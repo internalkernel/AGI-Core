@@ -14,13 +14,26 @@ from app.models.database import User
 
 router = APIRouter(tags=["discovery"])
 
+# Keys that expose internal filesystem paths
+_PATH_KEYS = {"path", "workspace", "config_path", "workspace_label"}
+
+
+def _strip_paths(items: list[dict]) -> list[dict]:
+    """Return copies of dicts with internal filesystem paths removed."""
+    return [{k: v for k, v in item.items() if k not in _PATH_KEYS} for item in items]
+
 
 @router.get("/api/discovery")
 async def full_discovery(_admin: User = Depends(require_admin)):
     result = get_cached_result()
     if not result:
         result = run_discovery()
-    return result
+    # Strip top-level filesystem paths even for admin (not operationally needed)
+    safe = {k: v for k, v in result.items() if k not in ("workspace", "workspaces")}
+    safe["pipelines"] = _strip_paths(safe.get("pipelines", []))
+    safe["agents"] = _strip_paths(safe.get("agents", []))
+    safe["skills"] = _strip_paths(safe.get("skills", []))
+    return safe
 
 
 @router.post("/api/discovery/refresh")
@@ -34,7 +47,8 @@ async def list_pipelines():
     result = get_cached_result()
     if not result:
         result = run_discovery()
-    return {"pipelines": result.get("pipelines", []), "total": len(result.get("pipelines", []))}
+    pipelines = _strip_paths(result.get("pipelines", []))
+    return {"pipelines": pipelines, "total": len(pipelines)}
 
 
 @router.get("/api/pipelines/{pipeline_id}")
@@ -44,7 +58,7 @@ async def get_pipeline(pipeline_id: str):
         result = run_discovery()
     for p in result.get("pipelines", []):
         if p["id"] == pipeline_id:
-            return p
+            return {k: v for k, v in p.items() if k not in _PATH_KEYS}
     return {"error": "Pipeline not found"}
 
 
@@ -53,7 +67,8 @@ async def list_agents():
     result = get_cached_result()
     if not result:
         result = run_discovery()
-    return {"agents": result.get("agents", []), "total": len(result.get("agents", []))}
+    agents = _strip_paths(result.get("agents", []))
+    return {"agents": agents, "total": len(agents)}
 
 
 @router.get("/api/agents/{agent_name}")
@@ -118,7 +133,8 @@ async def get_agent_detail(agent_name: str, _admin: User = Depends(require_admin
     agent["tools"] = [{"name": s["name"], "category": s["category"]} for s in skills]
 
     # Strip internal filesystem paths before returning
-    agent.pop("workspace", None)
+    for key in _PATH_KEYS:
+        agent.pop(key, None)
 
     return agent
 
@@ -143,7 +159,7 @@ async def list_skills(
 
     total = len(skills)
     start = (page - 1) * limit
-    page_skills = skills[start : start + limit]
+    page_skills = _strip_paths(skills[start : start + limit])
 
     return {"skills": page_skills, "total": total, "page": page, "limit": limit}
 
@@ -169,13 +185,18 @@ async def get_skill_detail(skill_name: str):
     for s in result.get("skills", []):
         if s["name"] == skill_name:
             detail = dict(s)
-            # Try to read README
-            from pathlib import Path
-            readme = Path(s["path"]) / "README.md"
-            if readme.exists():
-                try:
-                    detail["readme"] = readme.read_text()[:5000]
-                except Exception:
-                    pass
+            # Try to read README (using internal path before stripping)
+            skill_path = s.get("path")
+            if skill_path:
+                from pathlib import Path
+                readme = Path(skill_path) / "README.md"
+                if readme.exists():
+                    try:
+                        detail["readme"] = readme.read_text()[:5000]
+                    except Exception:
+                        pass
+            # Strip internal filesystem paths
+            for key in _PATH_KEYS:
+                detail.pop(key, None)
             return detail
     return {"error": "Skill not found"}

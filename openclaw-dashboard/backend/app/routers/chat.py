@@ -11,11 +11,12 @@ import uuid
 
 import httpx
 import websockets
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 
 from app.config import settings
-from app.services.auth import authenticate_websocket
+from app.models.database import User
+from app.services.auth import authenticate_websocket_admin, require_admin
 from app.services.gateway_rpc import (
     _handshake,
     AGENT_GATEWAYS,
@@ -41,13 +42,18 @@ def _check_chat_rate(timestamps: list[float]) -> bool:
     return True
 
 
+# Global concurrent chat WS cap
+_MAX_CHAT_WS = 20
+_active_chat_ws: set[int] = set()  # track by id(websocket)
+
+
 def _gateway_http_url(agent: str | None) -> str:
     ws_url = _gateway_ws_url(agent)
     return ws_url.replace("ws://", "http://").replace("wss://", "https://")
 
 
 @router.get("/api/chat/status")
-async def chat_status(agent: str | None = None):
+async def chat_status(agent: str | None = None, _admin: User = Depends(require_admin)):
     """Check if an agent's gateway is reachable."""
     url = _gateway_http_url(agent)
     try:
@@ -63,7 +69,7 @@ async def chat_status(agent: str | None = None):
 
 
 @router.get("/api/chat/agents")
-async def chat_agents():
+async def chat_agents(_admin: User = Depends(require_admin)):
     """Return available agents and their gateway status."""
     results = []
     async with httpx.AsyncClient() as client:
@@ -79,7 +85,7 @@ async def chat_agents():
 
 
 @router.post("/api/chat")
-async def chat_proxy(request_data: dict):
+async def chat_proxy(request_data: dict, _admin: User = Depends(require_admin)):
     """Send a chat message via agent gateway and return the final response."""
     message = request_data.get("message", "").strip()
     if not message:
@@ -176,9 +182,15 @@ async def websocket_collective_chat(websocket: WebSocket):
     yet are prepended as context so the addressed agent can follow the
     full discussion.
     """
-    user_id = await authenticate_websocket(websocket)
+    user_id = await authenticate_websocket_admin(websocket)
     if not user_id:
         return
+    # Connection cap
+    if len(_active_chat_ws) >= _MAX_CHAT_WS:
+        await websocket.close(code=1013, reason="Too many chat connections")
+        return
+    ws_id = id(websocket)
+    _active_chat_ws.add(ws_id)
 
     MAX_HISTORY = 200
     MAX_MSG_SIZE = 32_768  # 32KB max message from client
@@ -330,6 +342,7 @@ async def websocket_collective_chat(websocket: WebSocket):
             tasks.append(gateway_listener(agent_id, gw))
         await asyncio.gather(*tasks, return_exceptions=True)
     finally:
+        _active_chat_ws.discard(ws_id)
         for gw in gateways.values():
             try:
                 await gw.close()
@@ -344,9 +357,15 @@ async def websocket_collective_chat(websocket: WebSocket):
 @router.websocket("/ws/chat")
 async def websocket_chat(websocket: WebSocket, agent: str | None = None):
     """WebSocket chat proxy — bridges the dashboard client to an agent gateway."""
-    user_id = await authenticate_websocket(websocket)
+    user_id = await authenticate_websocket_admin(websocket)
     if not user_id:
         return
+    # Connection cap
+    if len(_active_chat_ws) >= _MAX_CHAT_WS:
+        await websocket.close(code=1013, reason="Too many chat connections")
+        return
+    ws_id = id(websocket)
+    _active_chat_ws.add(ws_id)
     agent_id = agent or DEFAULT_AGENT
     uri = _gateway_ws_url(agent_id)
 
@@ -452,6 +471,7 @@ async def websocket_chat(websocket: WebSocket, agent: str | None = None):
         except Exception:
             pass
     finally:
+        _active_chat_ws.discard(ws_id)
         try:
             await websocket.close()
         except Exception:

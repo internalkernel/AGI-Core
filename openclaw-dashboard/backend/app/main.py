@@ -183,6 +183,9 @@ async def activity_ws(websocket: WebSocket):
     try:
         while True:
             await websocket.receive_text()  # keep-alive
+            if not manager.check_rate(websocket):
+                await websocket.send_json({"error": "Rate limit exceeded"})
+                continue
     except WebSocketDisconnect:
         manager.disconnect(websocket, "activity")
 

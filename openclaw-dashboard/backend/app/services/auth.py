@@ -85,6 +85,34 @@ async def authenticate_websocket(websocket: WebSocket) -> Optional[str]:
     return None
 
 
+async def authenticate_websocket_admin(websocket: WebSocket) -> Optional[str]:
+    """Like authenticate_websocket but also enforces admin role.
+
+    Returns user-id on success, *None* after closing with 1008.
+    """
+    # Origin validation (CSWSH protection)
+    origin = websocket.headers.get("origin", "")
+    if origin and origin not in _ws_allowed_origins():
+        await websocket.close(code=1008, reason="Origin not allowed")
+        return None
+
+    from app.db.connection import async_session_factory
+    token = websocket.query_params.get("token")
+    if token:
+        user_id = decode_token(token)
+        if user_id and async_session_factory:
+            async with async_session_factory() as session:
+                result = await session.execute(
+                    select(User).where(User.id == uuid.UUID(user_id))
+                )
+                user = result.scalar_one_or_none()
+                if user is not None and user.is_admin:
+                    await websocket.accept()
+                    return user_id
+    await websocket.close(code=1008, reason="Admin access required")
+    return None
+
+
 async def get_current_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
     session: AsyncSession = Depends(get_session),
