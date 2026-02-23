@@ -24,7 +24,7 @@ async def list_activities(
     since: Optional[str] = None,
     until: Optional[str] = None,
     limit: int = Query(default=50, le=200),
-    offset: int = 0,
+    offset: int = Query(default=0, ge=0),
     _user=Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):

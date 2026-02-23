@@ -17,7 +17,7 @@ router = APIRouter(prefix="/api/search", tags=["search"])
 async def search(
     q: str = Query(..., min_length=1),
     type: str = Query(default="all"),
-    limit: int = Query(default=20, le=50),
+    limit: int = Query(default=20, ge=1, le=50),
     _user=Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):

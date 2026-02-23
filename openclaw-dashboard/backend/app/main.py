@@ -150,6 +150,10 @@ app.include_router(channels.router)
 app.include_router(projects_router.router)
 
 
+# Max inbound WS message size for keep-alive endpoints
+_WS_MAX_MSG = 4096
+
+
 # WebSocket for real-time overview updates
 @app.websocket("/ws/realtime")
 async def websocket_endpoint(websocket: WebSocket):
@@ -161,13 +165,18 @@ async def websocket_endpoint(websocket: WebSocket):
         return
     try:
         while True:
-            await websocket.receive_text()
+            msg = await websocket.receive_text()
+            if len(msg) > _WS_MAX_MSG:
+                await websocket.close(code=1009, reason="Message too large")
+                break
             if not manager.check_rate(websocket):
                 await websocket.send_json({"error": "Rate limit exceeded"})
                 continue
             ov = await overview.get_overview()
             await websocket.send_json({"type": "overview", "data": ov.dict()})
     except WebSocketDisconnect:
+        pass
+    finally:
         manager.disconnect(websocket, "realtime")
 
 
@@ -182,11 +191,16 @@ async def activity_ws(websocket: WebSocket):
         return
     try:
         while True:
-            await websocket.receive_text()  # keep-alive
+            msg = await websocket.receive_text()  # keep-alive
+            if len(msg) > _WS_MAX_MSG:
+                await websocket.close(code=1009, reason="Message too large")
+                break
             if not manager.check_rate(websocket):
                 await websocket.send_json({"error": "Rate limit exceeded"})
                 continue
     except WebSocketDisconnect:
+        pass
+    finally:
         manager.disconnect(websocket, "activity")
 
 

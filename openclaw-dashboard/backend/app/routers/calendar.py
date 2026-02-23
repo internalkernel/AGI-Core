@@ -10,8 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
 from app.db.connection import get_session
-from app.models.database import CalendarEvent
-from app.services.auth import get_current_user
+from app.models.database import CalendarEvent, User
+from app.services.auth import get_current_user, require_admin
 from app.services.calendar import (
     get_merged_feed,
     get_google_calendar_enabled,
@@ -70,7 +70,7 @@ async def list_events(
 @router.post("/events")
 async def create_event(
     body: CalendarEventCreate,
-    _user=Depends(get_current_user),
+    _admin: User = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
 ):
     google_event_id = None
@@ -110,11 +110,15 @@ async def create_event(
 async def update_event(
     event_id: str,
     body: CalendarEventUpdate,
-    _user=Depends(get_current_user),
+    _admin: User = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
 ):
+    try:
+        event_uuid = uuid.UUID(event_id)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid event ID format")
     result = await session.execute(
-        select(CalendarEvent).where(CalendarEvent.id == uuid.UUID(event_id))
+        select(CalendarEvent).where(CalendarEvent.id == event_uuid)
     )
     event = result.scalar_one_or_none()
     if not event:
@@ -131,11 +135,15 @@ async def update_event(
 @router.delete("/events/{event_id}")
 async def delete_event(
     event_id: str,
-    _user=Depends(get_current_user),
+    _admin: User = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
 ):
+    try:
+        event_uuid = uuid.UUID(event_id)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid event ID format")
     result = await session.execute(
-        select(CalendarEvent).where(CalendarEvent.id == uuid.UUID(event_id))
+        select(CalendarEvent).where(CalendarEvent.id == event_uuid)
     )
     event = result.scalar_one_or_none()
     if not event:
@@ -149,7 +157,7 @@ async def delete_event(
 
 @router.get("/settings")
 async def get_settings(
-    _user=Depends(get_current_user),
+    _admin: User = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
 ):
     enabled = await get_google_calendar_enabled(session)
@@ -159,7 +167,7 @@ async def get_settings(
 @router.put("/settings")
 async def update_settings(
     body: dict,
-    _user=Depends(get_current_user),
+    _admin: User = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
 ):
     if "google_calendar_enabled" in body:
