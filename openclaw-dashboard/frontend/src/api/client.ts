@@ -37,3 +37,13 @@ export function apiPatch<T>(path: string, body: unknown): Promise<T> {
 export function apiDelete<T>(path: string): Promise<T> {
   return apiFetch<T>(path, { method: 'DELETE' });
 }
+
+/**
+ * Build an authenticated WebSocket URL with the JWT token as a query param.
+ */
+export function wsUrl(path: string): string {
+  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const token = localStorage.getItem('openclaw_token') || '';
+  const sep = path.includes('?') ? '&' : '?';
+  return `${proto}//${window.location.host}${path}${sep}token=${encodeURIComponent(token)}`;
+}

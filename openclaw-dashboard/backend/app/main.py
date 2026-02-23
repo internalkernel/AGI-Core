@@ -13,10 +13,10 @@ from fastapi.responses import FileResponse, JSONResponse
 from app.config import settings
 from app.discovery.engine import run_discovery, needs_refresh
 from app.websocket.manager import manager
-from app.middleware.security import SecurityHeadersMiddleware, RequestSizeLimitMiddleware
+from app.middleware.security import SecurityHeadersMiddleware, RequestSizeLimitMiddleware, RateLimitMiddleware
 from app.db.connection import init_db, close_db, async_session_factory
 from app.redis.client import init_redis, close_redis
-from app.services.auth import seed_admin, decode_token
+from app.services.auth import seed_admin, decode_token, authenticate_websocket
 from app.routers import (
     overview, jobs, metrics, system, sessions, chat, logs, discovery, channels,
 )
@@ -76,6 +76,7 @@ app = FastAPI(
 
 # Security middleware (outermost = processes first)
 app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(RateLimitMiddleware, requests_per_minute=120)
 app.add_middleware(RequestSizeLimitMiddleware, max_size=2_097_152)  # 2MB
 app.add_middleware(GZipMiddleware, minimum_size=500)
 app.add_middleware(
@@ -93,7 +94,7 @@ app.add_middleware(
 
 # Auth-exempt paths
 AUTH_EXEMPT = {"/api/auth/login", "/api/system/health", "/api/webhook/activity", "/docs", "/openapi.json"}
-AUTH_EXEMPT_PREFIXES = ("/ws/", "/assets/")
+AUTH_EXEMPT_PREFIXES = ("/assets/",)
 
 
 @app.middleware("http")
@@ -111,8 +112,17 @@ async def auth_middleware(request: Request, call_next):
     if auth_header.startswith("Bearer "):
         token = auth_header[7:]
         user_id = decode_token(token)
-        if user_id:
-            return await call_next(request)
+        if user_id and async_session_factory:
+            # Verify user still exists in the database
+            import uuid
+            from sqlmodel import select
+            from app.models.database import User
+            async with async_session_factory() as session:
+                result = await session.execute(
+                    select(User.id).where(User.id == uuid.UUID(user_id))
+                )
+                if result.scalar_one_or_none() is not None:
+                    return await call_next(request)
 
     return JSONResponse(status_code=401, content={"detail": "Not authenticated"})
 
@@ -142,10 +152,18 @@ app.include_router(projects_router.router)
 # WebSocket for real-time overview updates
 @app.websocket("/ws/realtime")
 async def websocket_endpoint(websocket: WebSocket):
-    await manager.connect(websocket, "realtime")
+    user_id = await authenticate_websocket(websocket)
+    if not user_id:
+        return
+    connected = await manager.connect(websocket, "realtime", accepted=True)
+    if not connected:
+        return
     try:
         while True:
             await websocket.receive_text()
+            if not manager.check_rate(websocket):
+                await websocket.send_json({"error": "Rate limit exceeded"})
+                continue
             ov = await overview.get_overview()
             await websocket.send_json({"type": "overview", "data": ov.dict()})
     except WebSocketDisconnect:
@@ -155,7 +173,12 @@ async def websocket_endpoint(websocket: WebSocket):
 # WebSocket for activity stream
 @app.websocket("/ws/activity")
 async def activity_ws(websocket: WebSocket):
-    await manager.connect(websocket, "activity")
+    user_id = await authenticate_websocket(websocket)
+    if not user_id:
+        return
+    connected = await manager.connect(websocket, "activity", accepted=True)
+    if not connected:
+        return
     try:
         while True:
             await websocket.receive_text()  # keep-alive
@@ -179,7 +202,9 @@ if frontend_dist.exists():
     async def spa_fallback(full_path: str):
         if full_path.startswith(("api/", "ws/", "health", "docs", "openapi")):
             return JSONResponse({"detail": "Not Found"}, status_code=404)
-        fp = frontend_dist / full_path
+        fp = (frontend_dist / full_path).resolve()
+        if not fp.is_relative_to(frontend_dist.resolve()):
+            return JSONResponse({"detail": "Not Found"}, status_code=404)
         if fp.exists() and fp.is_file():
             return FileResponse(fp)
         return FileResponse(frontend_dist / "index.html")

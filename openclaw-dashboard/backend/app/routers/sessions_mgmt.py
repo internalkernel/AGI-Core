@@ -2,12 +2,14 @@
 
 from typing import Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
 
 from app.config import settings
 from app.services.gateway_rpc import gateway_call
 from app.services.job_service import get_sessions_detailed
+from app.services.auth import require_admin
+from app.models.database import User
 
 router = APIRouter(tags=["sessions_mgmt"])
 
@@ -37,7 +39,7 @@ async def session_usage(session_id: str, agent: Optional[str] = Query(None)):
 
 
 @router.patch("/api/sessions/{session_id}")
-async def update_session(session_id: str, data: dict, agent: Optional[str] = Query(None)):
+async def update_session(session_id: str, data: dict, _admin: User = Depends(require_admin), agent: Optional[str] = Query(None)):
     """Update session settings (model, thinking, reasoning) via RPC."""
     params = {"sessionId": session_id}
     if "model" in data:
@@ -61,11 +63,11 @@ async def update_session(session_id: str, data: dict, agent: Optional[str] = Que
     except ConnectionError:
         return JSONResponse({"error": "Gateway unavailable"}, status_code=503)
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"error": "Internal server error"}, status_code=500)
 
 
 @router.delete("/api/sessions/{session_id}")
-async def delete_session(session_id: str, agent: Optional[str] = Query(None)):
+async def delete_session(session_id: str, _admin: User = Depends(require_admin), agent: Optional[str] = Query(None)):
     """Delete a session via RPC."""
     try:
         result = await gateway_call("sessions.delete", {"sessionId": session_id}, agent=agent)
@@ -75,7 +77,7 @@ async def delete_session(session_id: str, agent: Optional[str] = Query(None)):
     except ConnectionError:
         return JSONResponse({"error": "Gateway unavailable"}, status_code=503)
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"error": "Internal server error"}, status_code=500)
 
 
 @router.get("/api/sessions/{session_id}/history")

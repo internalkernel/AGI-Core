@@ -9,6 +9,8 @@ from app.models.schemas import JobStatus, JobControl
 from app.services.job_service import get_jobs_list, get_job_history, control_job
 from app.services.gateway_rpc import gateway_call
 from app.services.event_bus import EventBus, get_event_bus
+from app.services.auth import require_admin
+from app.models.database import User
 
 router = APIRouter(tags=["jobs"])
 
@@ -50,7 +52,7 @@ async def job_history(job_id: str, limit: int = Query(50, le=500)):
 
 
 @router.post("/api/jobs")
-async def create_job(data: dict, event_bus: EventBus = Depends(get_event_bus)):
+async def create_job(data: dict, _admin: User = Depends(require_admin), event_bus: EventBus = Depends(get_event_bus)):
     """Create a new cron job via gateway RPC."""
     name = (data.get("name") or "").strip()
     if not name:
@@ -90,11 +92,11 @@ async def create_job(data: dict, event_bus: EventBus = Depends(get_event_bus)):
     except ConnectionError:
         return JSONResponse({"error": "Gateway unavailable"}, status_code=503)
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"error": "Internal server error"}, status_code=500)
 
 
 @router.put("/api/jobs/{job_id}")
-async def update_job(job_id: str, data: dict):
+async def update_job(job_id: str, data: dict, _admin: User = Depends(require_admin)):
     """Update an existing cron job via gateway RPC."""
     params = {"id": job_id}
 
@@ -135,11 +137,11 @@ async def update_job(job_id: str, data: dict):
     except ConnectionError:
         return JSONResponse({"error": "Gateway unavailable"}, status_code=503)
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"error": "Internal server error"}, status_code=500)
 
 
 @router.delete("/api/jobs/{job_id}")
-async def delete_job(job_id: str, event_bus: EventBus = Depends(get_event_bus)):
+async def delete_job(job_id: str, _admin: User = Depends(require_admin), event_bus: EventBus = Depends(get_event_bus)):
     """Delete a cron job via gateway RPC."""
     try:
         result = await gateway_call("cron.remove", {"id": job_id})
@@ -151,11 +153,11 @@ async def delete_job(job_id: str, event_bus: EventBus = Depends(get_event_bus)):
     except ConnectionError:
         return JSONResponse({"error": "Gateway unavailable"}, status_code=503)
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"error": "Internal server error"}, status_code=500)
 
 
 @router.post("/api/jobs/{job_id}/run")
-async def run_job(job_id: str, event_bus: EventBus = Depends(get_event_bus)):
+async def run_job(job_id: str, _admin: User = Depends(require_admin), event_bus: EventBus = Depends(get_event_bus)):
     """Trigger immediate job run via gateway RPC."""
     try:
         result = await gateway_call("cron.run", {"id": job_id})
@@ -168,11 +170,11 @@ async def run_job(job_id: str, event_bus: EventBus = Depends(get_event_bus)):
         # Fallback to file-based control
         return control_job(job_id, "run_now")
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"error": "Internal server error"}, status_code=500)
 
 
 @router.post("/api/jobs/control")
-async def job_control(ctrl: JobControl):
+async def job_control(ctrl: JobControl, _admin: User = Depends(require_admin)):
     result = control_job(ctrl.job_id, ctrl.action)
     if "error" in result:
         raise HTTPException(status_code=404, detail=result["error"])

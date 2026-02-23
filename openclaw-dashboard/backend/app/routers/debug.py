@@ -4,7 +4,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
 
 from app.config import settings
@@ -14,12 +14,14 @@ from app.services.gateway_rpc import (
     _agent_ws_url,
     AGENT_GATEWAYS,
 )
+from app.services.auth import require_admin
+from app.models.database import User
 
 router = APIRouter(tags=["debug"])
 
 
 @router.get("/api/debug/health")
-async def debug_health(agent: Optional[str] = Query(None)):
+async def debug_health(agent: Optional[str] = Query(None), _admin: User = Depends(require_admin)):
     """Detailed health check via gateway RPC."""
     try:
         result = await gateway_call("health", agent=agent)
@@ -31,7 +33,7 @@ async def debug_health(agent: Optional[str] = Query(None)):
 
 
 @router.get("/api/debug/status")
-async def debug_status(agent: Optional[str] = Query(None)):
+async def debug_status(agent: Optional[str] = Query(None), _admin: User = Depends(require_admin)):
     """Full system status via gateway RPC."""
     try:
         result = await gateway_call("status", agent=agent)
@@ -43,7 +45,7 @@ async def debug_status(agent: Optional[str] = Query(None)):
 
 
 @router.get("/api/debug/presence")
-async def debug_presence(agent: Optional[str] = Query(None)):
+async def debug_presence(agent: Optional[str] = Query(None), _admin: User = Depends(require_admin)):
     """System presence via gateway RPC."""
     try:
         result = await gateway_call("system-presence", agent=agent)
@@ -55,7 +57,7 @@ async def debug_presence(agent: Optional[str] = Query(None)):
 
 
 @router.get("/api/debug/gateway")
-async def debug_gateway(agent: Optional[str] = Query(None)):
+async def debug_gateway(agent: Optional[str] = Query(None), _admin: User = Depends(require_admin)):
     """Test gateway connection — connect and disconnect."""
     start = time.time()
     gateway_url = _agent_ws_url(agent) if agent else settings.gateway_ws_url
@@ -76,12 +78,12 @@ async def debug_gateway(agent: Optional[str] = Query(None)):
             "latency_ms": latency_ms,
             "gateway_url": gateway_url,
             "agent": agent,
-            "error": str(e),
+            "error": "Gateway connection failed",
         }
 
 
 @router.get("/api/debug/sessions")
-async def debug_sessions(agent: Optional[str] = Query(None)):
+async def debug_sessions(agent: Optional[str] = Query(None), _admin: User = Depends(require_admin)):
     """Sessions with usage via gateway RPC."""
     sessions = []
     try:
@@ -109,7 +111,7 @@ async def debug_sessions(agent: Optional[str] = Query(None)):
 
 
 @router.get("/api/debug/logs")
-async def debug_logs(agent: Optional[str] = Query(None)):
+async def debug_logs(agent: Optional[str] = Query(None), _admin: User = Depends(require_admin)):
     """Recent logs via gateway RPC."""
     try:
         result = await gateway_call("logs.tail", {"lines": 100}, agent=agent)
@@ -118,21 +120,27 @@ async def debug_logs(agent: Optional[str] = Query(None)):
     except Exception:
         pass
 
-    # Fallback: read from log files directly
+    # Fallback: read from log files directly (bounded read)
     logs_dir = settings.openclaw_dir / "logs"
     lines = []
     if logs_dir.exists():
+        from collections import deque
+        MAX_READ = 2 * 1024 * 1024
         for log_file in sorted(logs_dir.glob("*.log"), key=lambda p: p.stat().st_mtime, reverse=True)[:1]:
             try:
-                content = log_file.read_text()
-                lines = content.strip().split("\n")[-100:]
+                file_size = log_file.stat().st_size
+                with open(log_file, "rb") as f:
+                    if file_size > MAX_READ:
+                        f.seek(-MAX_READ, 2)
+                        f.readline()
+                    lines = [l.decode("utf-8", errors="replace").rstrip("\n") for l in deque(f, maxlen=100)]
             except Exception:
                 pass
     return {"lines": lines, "source": "file"}
 
 
 @router.get("/api/debug/filesystem")
-async def debug_filesystem(agent: Optional[str] = Query(None)):
+async def debug_filesystem(agent: Optional[str] = Query(None), _admin: User = Depends(require_admin)):
     """Check critical file system paths.
 
     When an agent is specified the workspace path is scoped to that agent.

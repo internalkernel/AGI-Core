@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 import uuid
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, WebSocket, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -41,6 +41,30 @@ def decode_token(token: str) -> Optional[str]:
         return None
 
 
+async def authenticate_websocket(websocket: WebSocket) -> Optional[str]:
+    """Validate JWT on a WebSocket handshake and accept or reject.
+
+    The token is read from the ``token`` query parameter.  Returns the
+    user-id string on success (after accepting the connection) or *None*
+    after closing the socket with 1008 (Policy Violation).
+    """
+    from app.db.connection import async_session_factory
+    token = websocket.query_params.get("token")
+    if token:
+        user_id = decode_token(token)
+        if user_id and async_session_factory:
+            # Verify user still exists in the database
+            async with async_session_factory() as session:
+                result = await session.execute(
+                    select(User).where(User.id == uuid.UUID(user_id))
+                )
+                if result.scalar_one_or_none() is not None:
+                    await websocket.accept()
+                    return user_id
+    await websocket.close(code=1008, reason="Authentication required")
+    return None
+
+
 async def get_current_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
     session: AsyncSession = Depends(get_session),
@@ -57,10 +81,25 @@ async def get_current_user(
     return user
 
 
+async def require_admin(user: User = Depends(get_current_user)) -> User:
+    """Dependency that enforces admin access."""
+    if not user.is_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+    return user
+
+
 async def seed_admin(session: AsyncSession):
     """Create admin user on first run if no users exist."""
+    from app.config import _INSECURE_PASSWORDS
     result = await session.execute(select(User).limit(1))
     if result.scalar_one_or_none() is None:
+        if settings.admin_password in _INSECURE_PASSWORDS:
+            import logging
+            logging.getLogger("openclaw.auth").warning(
+                "Skipping admin seed — OPENCLAW_DASH_ADMIN_PASSWORD is insecure. "
+                "Set a strong password in .env and restart to create the admin user."
+            )
+            return
         admin = User(
             username="admin",
             hashed_password=hash_password(settings.admin_password),

@@ -1,10 +1,12 @@
 """Node and device management endpoints using gateway RPC."""
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
 from app.services.gateway_rpc import gateway_call
 from app.services.job_service import get_devices
+from app.services.auth import require_admin
+from app.models.database import User
 
 router = APIRouter(tags=["nodes"])
 
@@ -35,7 +37,7 @@ async def list_devices():
 
 
 @router.post("/api/nodes/devices/{device_id}/approve")
-async def approve_device(device_id: str):
+async def approve_device(device_id: str, _admin: User = Depends(require_admin)):
     """Approve a pending device pairing."""
     try:
         result = await gateway_call("device.pair.approve", {"deviceId": device_id})
@@ -45,11 +47,11 @@ async def approve_device(device_id: str):
     except ConnectionError:
         return JSONResponse({"error": "Gateway unavailable"}, status_code=503)
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"error": "Internal server error"}, status_code=500)
 
 
 @router.post("/api/nodes/devices/{device_id}/reject")
-async def reject_device(device_id: str):
+async def reject_device(device_id: str, _admin: User = Depends(require_admin)):
     """Reject a pending device pairing."""
     try:
         result = await gateway_call("device.pair.reject", {"deviceId": device_id})
@@ -59,11 +61,11 @@ async def reject_device(device_id: str):
     except ConnectionError:
         return JSONResponse({"error": "Gateway unavailable"}, status_code=503)
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"error": "Internal server error"}, status_code=500)
 
 
 @router.post("/api/nodes/devices/{device_id}/revoke")
-async def revoke_device(device_id: str):
+async def revoke_device(device_id: str, _admin: User = Depends(require_admin)):
     """Revoke a device token."""
     try:
         result = await gateway_call("device.token.revoke", {"deviceId": device_id})
@@ -73,11 +75,11 @@ async def revoke_device(device_id: str):
     except ConnectionError:
         return JSONResponse({"error": "Gateway unavailable"}, status_code=503)
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"error": "Internal server error"}, status_code=500)
 
 
 @router.post("/api/nodes/devices/{device_id}/rotate")
-async def rotate_device_token(device_id: str):
+async def rotate_device_token(device_id: str, _admin: User = Depends(require_admin)):
     """Rotate a device token."""
     try:
         result = await gateway_call("device.token.rotate", {"deviceId": device_id})
@@ -87,4 +89,4 @@ async def rotate_device_token(device_id: str):
     except ConnectionError:
         return JSONResponse({"error": "Gateway unavailable"}, status_code=503)
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"error": "Internal server error"}, status_code=500)

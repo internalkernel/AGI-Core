@@ -14,6 +14,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 
 from app.config import settings
+from app.services.auth import authenticate_websocket
 from app.services.gateway_rpc import (
     _handshake,
     AGENT_GATEWAYS,
@@ -128,7 +129,7 @@ async def chat_proxy(request_data: dict):
             status_code=503,
         )
     except Exception as e:
-        return JSONResponse({"error": f"Chat error: {str(e)}"}, status_code=500)
+        return JSONResponse({"error": "Chat request failed"}, status_code=500)
 
 
 def _agent_label(agent_id: str) -> str:
@@ -160,8 +161,12 @@ async def websocket_collective_chat(websocket: WebSocket):
     yet are prepended as context so the addressed agent can follow the
     full discussion.
     """
-    await websocket.accept()
+    user_id = await authenticate_websocket(websocket)
+    if not user_id:
+        return
 
+    MAX_HISTORY = 200
+    MAX_MSG_SIZE = 32_768  # 32KB max message from client
     gateways: dict[str, websockets.WebSocketClientProtocol] = {}
     collective_history: list[dict] = []
     streaming_buf: dict[str, str] = {}          # per-agent streaming buffer
@@ -256,6 +261,9 @@ async def websocket_collective_chat(websocket: WebSocket):
         try:
             while True:
                 raw = await websocket.receive_text()
+                if len(raw) > MAX_MSG_SIZE:
+                    await websocket.send_json({"type": "error", "error": "Message too large"})
+                    continue
                 data = json.loads(raw)
                 content = data.get("content", data.get("message", ""))
                 target = data.get("agent", DEFAULT_AGENT)
@@ -263,13 +271,15 @@ async def websocket_collective_chat(websocket: WebSocket):
                 if not content or target not in gateways:
                     continue
 
-                # record user message
+                # record user message (bounded history)
                 collective_history.append({
                     "role": "user",
                     "agent": target,
                     "content": content,
                     "seen_by": {target},
                 })
+                if len(collective_history) > MAX_HISTORY:
+                    del collective_history[:len(collective_history) - MAX_HISTORY]
 
                 # build context from messages this agent hasn't seen
                 context = _build_context(collective_history[:-1], target)
@@ -315,7 +325,9 @@ async def websocket_collective_chat(websocket: WebSocket):
 @router.websocket("/ws/chat")
 async def websocket_chat(websocket: WebSocket, agent: str | None = None):
     """WebSocket chat proxy — bridges the dashboard client to an agent gateway."""
-    await websocket.accept()
+    user_id = await authenticate_websocket(websocket)
+    if not user_id:
+        return
     agent_id = agent or DEFAULT_AGENT
     uri = _gateway_ws_url(agent_id)
 

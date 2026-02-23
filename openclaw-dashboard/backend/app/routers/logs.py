@@ -2,8 +2,10 @@
 
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from app.config import settings
+from app.services.auth import require_admin
+from app.models.database import User
 
 router = APIRouter(tags=["logs"])
 
@@ -31,7 +33,7 @@ def _collect_log_sources() -> dict[str, Path]:
 
 
 @router.get("/api/logs/files")
-async def list_log_files():
+async def list_log_files(_admin: User = Depends(require_admin)):
     sources = _collect_log_sources()
     files = []
     for name, path in sources.items():
@@ -49,7 +51,7 @@ async def list_log_files():
 
 
 @router.get("/api/logs/tail")
-async def tail_logs(file: str = "openclaw.log", lines: int = Query(100, le=1000)):
+async def tail_logs(file: str = "openclaw.log", lines: int = Query(100, le=1000), _admin: User = Depends(require_admin)):
     sources = _collect_log_sources()
     path = sources.get(file)
     if path is None or not path.exists():
@@ -63,9 +65,16 @@ async def tail_logs(file: str = "openclaw.log", lines: int = Query(100, le=1000)
         raise HTTPException(status_code=400, detail="Invalid filename")
 
     try:
-        with open(path) as f:
-            all_lines = f.readlines()
-            recent = all_lines[-lines:]
-        return {"file": file, "lines": recent, "total": len(all_lines)}
+        from collections import deque
+        MAX_READ_BYTES = 2 * 1024 * 1024  # 2MB cap
+        file_size = path.stat().st_size
+        with open(path, "rb") as f:
+            # Seek near end to avoid loading entire file into memory
+            if file_size > MAX_READ_BYTES:
+                f.seek(-MAX_READ_BYTES, 2)
+                f.readline()  # discard partial first line
+            recent = deque(f, maxlen=lines)
+        decoded = [line.decode("utf-8", errors="replace").rstrip("\n") for line in recent]
+        return {"file": file, "lines": decoded, "total": len(decoded)}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to read log file")

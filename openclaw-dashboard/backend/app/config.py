@@ -1,8 +1,14 @@
 """Configuration via environment variables with sensible defaults."""
 
 import json
+import logging
+import secrets
 from pathlib import Path
 from pydantic_settings import BaseSettings
+
+log = logging.getLogger("openclaw.config")
+
+_INSECURE_PASSWORDS = {"changeme", "password", "admin", "123456", ""}
 
 
 class Settings(BaseSettings):
@@ -53,6 +59,22 @@ class Settings(BaseSettings):
             pass
         return self.gateway_token
 
+    def validate_secrets(self) -> None:
+        """Validate auth secrets at startup; generate secret_key if missing."""
+        if not self.secret_key:
+            self.secret_key = secrets.token_urlsafe(64)
+            log.warning(
+                "OPENCLAW_DASH_SECRET_KEY is not set — generated an ephemeral key. "
+                "JWTs will be invalidated on restart. Set OPENCLAW_DASH_SECRET_KEY "
+                "in .env for persistent sessions."
+            )
+        if self.admin_password in _INSECURE_PASSWORDS:
+            log.critical(
+                "OPENCLAW_DASH_ADMIN_PASSWORD is insecure. "
+                "Set a strong password in .env before exposing to a network."
+            )
+
 
 settings = Settings()
 settings.load_gateway_token()
+settings.validate_secrets()

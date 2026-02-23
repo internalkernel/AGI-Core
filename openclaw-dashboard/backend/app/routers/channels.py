@@ -4,10 +4,12 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from app.config import settings
+from app.services.auth import require_admin
+from app.models.database import User
 
 router = APIRouter(tags=["channels"])
 
@@ -89,7 +91,7 @@ async def get_channel(channel_id: str):
 
 
 @router.put("/api/channels/{channel_id}")
-async def update_channel(channel_id: str, update: ChannelUpdate):
+async def update_channel(channel_id: str, update: ChannelUpdate, _admin: User = Depends(require_admin)):
     channels = _read_channels()
     for ch in channels:
         if ch["id"] == channel_id:
@@ -101,7 +103,7 @@ async def update_channel(channel_id: str, update: ChannelUpdate):
 
 
 @router.post("/api/channels")
-async def create_channel(channel: ChannelCreate):
+async def create_channel(channel: ChannelCreate, _admin: User = Depends(require_admin)):
     channels = _read_channels()
     for ch in channels:
         if ch["id"] == channel.id:
@@ -113,7 +115,7 @@ async def create_channel(channel: ChannelCreate):
 
 
 @router.delete("/api/channels/{channel_id}")
-async def delete_channel(channel_id: str):
+async def delete_channel(channel_id: str, _admin: User = Depends(require_admin)):
     channels = _read_channels()
     original_len = len(channels)
     channels = [ch for ch in channels if ch["id"] != channel_id]

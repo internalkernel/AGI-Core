@@ -39,10 +39,12 @@ class ChangePasswordRequest(BaseModel):
 
 
 def _client_ip(request: Request) -> str:
-    """Extract the real client IP, respecting X-Forwarded-For from Apache."""
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
+    """Extract the client IP from the socket connection.
+
+    X-Forwarded-For is intentionally ignored to prevent spoofing.
+    If behind a trusted reverse proxy, configure uvicorn's
+    ``--proxy-headers`` and ``--forwarded-allow-ips`` instead.
+    """
     return request.client.host if request.client else "unknown"
 
 

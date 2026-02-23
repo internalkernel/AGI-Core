@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { AGENTS } from '../constants/agents';
 import type { ChatMessage } from '../api/types';
 import { Send, Loader2, WifiOff, Columns2, Columns3, Columns4, Trash2 } from 'lucide-react';
+import { wsUrl } from '../api/client';
 
 /* ── Agent colour helpers ──────────────────────────────────────── */
 
@@ -73,10 +74,7 @@ function ChatColumn({
     streamingRef.current = null;
     setSending(false);
 
-    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const socket = new WebSocket(
-      `${proto}//${window.location.host}/ws/chat?agent=${agentId}`,
-    );
+    const socket = new WebSocket(wsUrl(`/ws/chat?agent=${agentId}`));
 
     socket.onopen = () => setConnected(true);
 
@@ -295,10 +293,7 @@ function CollectiveColumn() {
 
   /* single WS to the collective backend endpoint */
   useEffect(() => {
-    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const socket = new WebSocket(
-      `${proto}//${window.location.host}/ws/chat/collective`,
-    );
+    const socket = new WebSocket(wsUrl('/ws/chat/collective'));
 
     socket.onopen = () => setConnected(true);
 

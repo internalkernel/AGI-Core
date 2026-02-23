@@ -83,11 +83,13 @@ async def get_agent_detail(agent_name: str):
         else:
             agent["identity"] = None
 
-        # Read config.json as workspace_config
+        # Read config.json as workspace_config (redact secrets recursively)
         config_file = ws / "config.json"
         if config_file.exists():
             try:
-                agent["workspace_config"] = json.loads(config_file.read_text())
+                from app.routers.config import _redact_secrets
+                raw_config = json.loads(config_file.read_text())
+                agent["workspace_config"] = _redact_secrets(raw_config)
             except Exception:
                 agent["workspace_config"] = None
         else:

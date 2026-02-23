@@ -46,31 +46,9 @@ async def system_resources():
 
 @router.get("/api/system/health")
 async def system_health():
-    od = settings.openclaw_dir
-    backup_dir = od / "backups"
-    latest_backup = None
-    if backup_dir.exists():
-        backups = sorted(backup_dir.glob("2026*"), reverse=True)
-        if backups:
-            latest_backup = backups[0].name
-
-    security_dir = od / "security"
-    latest_security = None
-    if security_dir.exists():
-        checks = sorted(security_dir.glob("security-check-*.log"), reverse=True)
-        if checks:
-            latest_security = checks[0].name
-
+    """Minimal liveness probe — no operational metadata exposed."""
     return {
         "status": "healthy",
-        "checks": {
-            "openclaw_dir": od.exists(),
-            "cron_configured": (od / "cron" / "jobs.json").exists(),
-            "sessions_active": get_session_count() > 0,
-            "devices_paired": len(get_devices()) > 0,
-            "latest_backup": latest_backup,
-            "latest_security_check": latest_security,
-        },
         "timestamp": datetime.now().isoformat(),
     }
 

@@ -49,9 +49,15 @@ async def list_events(
     _user=Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
+    import calendar as cal_mod
     now = datetime.now(timezone.utc)
     start_dt = datetime.fromisoformat(start) if start else now.replace(day=1, hour=0, minute=0, second=0)
-    end_dt = datetime.fromisoformat(end) if end else now.replace(month=now.month % 12 + 1 if now.month < 12 else 1, day=28)
+    if end:
+        end_dt = datetime.fromisoformat(end)
+    else:
+        # Compute last day of the current month
+        last_day = cal_mod.monthrange(now.year, now.month)[1]
+        end_dt = now.replace(day=last_day, hour=23, minute=59, second=59)
     return await get_merged_feed(start_dt, end_dt, include_google, session)
 
 

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import type { ActivityItem } from '../api/activity';
+import { wsUrl } from '../api/client';
 
 export function useActivityStream() {
   const [activities, setActivities] = useState<ActivityItem[]>([]);
@@ -10,8 +11,7 @@ export function useActivityStream() {
   }, []);
 
   useEffect(() => {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${protocol}//${window.location.host}/ws/activity`);
+    const ws = new WebSocket(wsUrl('/ws/activity'));
     wsRef.current = ws;
 
     ws.onopen = () => {

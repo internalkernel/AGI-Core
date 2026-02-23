@@ -1,6 +1,7 @@
 """Projects API — browse agent project files."""
 
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -14,8 +15,19 @@ MAX_DEPTH = 5
 MAX_ENTRIES = 500
 MAX_FILE_SIZE = 50 * 1024  # 50KB
 
+# Only allow alphanumeric, hyphens, and underscores in agent IDs
+_SAFE_AGENT_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
+
+# File extensions that must never be served (secrets, keys, credentials)
+_BLOCKED_EXTENSIONS = {
+    ".env", ".key", ".pem", ".p12", ".pfx", ".jks", ".keystore",
+    ".secret", ".credentials", ".htpasswd", ".pgpass",
+}
+
 
 def _projects_dir(agent_id: str) -> Path:
+    if not _SAFE_AGENT_RE.match(agent_id):
+        raise HTTPException(status_code=400, detail="Invalid agent ID")
     return settings.openclaw_dir / f"workspace-{agent_id}" / "projects"
 
 
@@ -29,9 +41,14 @@ def _validate_agent(agent_id: str) -> Path:
 
 def _safe_resolve(base: Path, relative: str) -> Path:
     """Resolve a relative path and ensure it stays within the base directory."""
+    base_resolved = base.resolve()
     resolved = (base / relative).resolve()
-    if not str(resolved).startswith(str(base.resolve())):
+    if not resolved.is_relative_to(base_resolved):
         raise HTTPException(status_code=403, detail="Path traversal not allowed")
+    if resolved.is_symlink():
+        real = resolved.resolve(strict=True)
+        if not real.is_relative_to(base_resolved):
+            raise HTTPException(status_code=403, detail="Symlink escapes base directory")
     return resolved
 
 
@@ -120,9 +137,15 @@ async def read_file(agent_id: str, path: str = Query(..., description="Relative 
 
     stat = file_path.stat()
     name = file_path.name
+
+    # Block sensitive file types
+    suffix = name.lower().rsplit(".", 1)
+    if len(suffix) > 1 and f".{suffix[-1]}" in _BLOCKED_EXTENSIONS:
+        raise HTTPException(status_code=403, detail="Access to this file type is not allowed")
+
     is_text = name.lower().endswith(
         (".md", ".txt", ".json", ".yaml", ".yml", ".toml", ".csv", ".html", ".css",
-         ".js", ".ts", ".py", ".sh", ".xml", ".ini", ".cfg", ".log", ".env")
+         ".js", ".ts", ".py", ".sh", ".xml", ".ini", ".cfg", ".log")
     )
 
     if not is_text:

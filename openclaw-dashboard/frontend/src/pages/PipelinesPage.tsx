@@ -92,6 +92,15 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+function sanitizeHref(url: string): string {
+  const decoded = url.replace(/&amp;/g, '&');
+  if (/^https?:\/\//i.test(decoded) || /^mailto:/i.test(decoded)) {
+    // Attribute-escape quotes to prevent breaking out of href="..."
+    return url.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+  return '';
+}
+
 function inlineMarkdown(text: string): string {
   let s = escapeHtml(text);
   // Bold
@@ -100,8 +109,12 @@ function inlineMarkdown(text: string): string {
   s = s.replace(/\*(.+?)\*/g, '<em>$1</em>');
   // Inline code
   s = s.replace(/`([^`]+)`/g, '<code class="bg-slate-900 px-1.5 py-0.5 rounded text-sm text-blue-300">$1</code>');
-  // Links
-  s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" class="text-blue-400 underline" target="_blank" rel="noopener noreferrer">$1</a>');
+  // Links — only allow http(s) and mailto protocols
+  s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_match, label, href) => {
+    const safe = sanitizeHref(href);
+    if (!safe) return label;
+    return `<a href="${safe}" class="text-blue-400 underline" target="_blank" rel="noopener noreferrer">${label}</a>`;
+  });
   return s;
 }
 
