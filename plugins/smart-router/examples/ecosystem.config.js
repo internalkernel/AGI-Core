@@ -19,6 +19,12 @@ module.exports = {
       interpreter: 'node',
       env: {
         ROUTER_PORT: '9999',
+        // IMPORTANT: Set ROUTER_API_KEY to a strong random secret in production.
+        // All non-health endpoints require Bearer auth when this is set.
+        // Without it, auth is BLOCKED unless ROUTER_ALLOW_UNAUTHENTICATED=true.
+        ROUTER_API_KEY: process.env.ROUTER_API_KEY || '',
+        // Set to 'true' ONLY for local development without auth:
+        // ROUTER_ALLOW_UNAUTHENTICATED: 'true',
         ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
         SYNTHETIC_API_KEY: process.env.SYNTHETIC_API_KEY,
         GOOGLE_API_KEY: process.env.GOOGLE_API_KEY,
@@ -42,6 +48,7 @@ module.exports = {
         OPENCLAW_AGENT_ID: 'content-specialist',
         OPENCLAW_AGENT_NAME: 'Content Specialist Agent',
         OPENCLAW_PORT: '8410',
+        // WARNING: Replace with a strong random token in production
         OPENCLAW_GATEWAY_TOKEN: 'content-specialist-token-2024',
         ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
         GOOGLE_API_KEY: process.env.GOOGLE_API_KEY,
@@ -63,6 +70,7 @@ module.exports = {
         OPENCLAW_AGENT_ID: 'devops',
         OPENCLAW_AGENT_NAME: 'DevOps Agent',
         OPENCLAW_PORT: '8420',
+        // WARNING: Replace with a strong random token in production
         OPENCLAW_GATEWAY_TOKEN: 'devops-token-2024',
         ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
         GOOGLE_API_KEY: process.env.GOOGLE_API_KEY,
