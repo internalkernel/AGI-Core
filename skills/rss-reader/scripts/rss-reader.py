@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.10"
-# dependencies = ["feedparser", "python-dateutil"]
+# dependencies = ["feedparser", "python-dateutil", "requests"]
 # ///
 """RSS feed reader for agent consumption. JSON output, deduplication via state file."""
 
@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import feedparser
+import requests
 from dateutil import parser as dateparser
 
 
@@ -39,6 +40,62 @@ def stderr(*args, **kwargs):
     print(*args, file=sys.stderr, **kwargs)
 
 
+import contextlib
+import socket as _socket
+
+
+def _validate_feed_url(url: str) -> str | None:
+    """Validate feed URL and return pinned IP. Must be http/https, no internal/private targets."""
+    from urllib.parse import urlparse
+    import re
+    import ipaddress
+    import socket
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        stderr(f"Error: Invalid URL scheme '{parsed.scheme}'. Only http and https are allowed.")
+        sys.exit(1)
+    host = (parsed.hostname or "").lower()
+    if host in ("localhost", "127.0.0.1", "0.0.0.0", "::1", "[::1]"):
+        stderr(f"Error: Loopback URLs are not allowed: {url}")
+        sys.exit(1)
+    if re.match(r"^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.|127\.)", host):
+        stderr(f"Error: Private/internal network URLs are not allowed: {url}")
+        sys.exit(1)
+    if host.endswith((".internal", ".local", ".localhost")):
+        stderr(f"Error: Internal domain URLs are not allowed: {url}")
+        sys.exit(1)
+    # DNS resolution check: only allow globally-routable IPs (fail closed)
+    # Returns first valid IP for connect-time pinning
+    first_ip = None
+    try:
+        for info in socket.getaddrinfo(host, None, socket.AF_UNSPEC, socket.SOCK_STREAM):
+            addr = ipaddress.ip_address(info[4][0])
+            if not addr.is_global:
+                stderr(f"Error: URL resolves to non-global IP ({addr}): {url}")
+                sys.exit(1)
+            if first_ip is None:
+                first_ip = str(addr)
+    except socket.gaierror as e:
+        stderr(f"Error: DNS resolution failed for {host}: {e}")
+        sys.exit(1)
+    return first_ip
+
+
+@contextlib.contextmanager
+def _pinned_dns(hostname: str, pinned_ip: str):
+    """Temporarily pin DNS resolution to eliminate DNS-rebinding TOCTOU."""
+    orig = _socket.getaddrinfo
+    def patched(host, port, *args, **kwargs):
+        if isinstance(host, str) and host.lower() == hostname.lower():
+            return orig(pinned_ip, port, *args, **kwargs)
+        return orig(host, port, *args, **kwargs)
+    _socket.getaddrinfo = patched
+    try:
+        yield
+    finally:
+        _socket.getaddrinfo = orig
+
+
 # --- commands ---
 
 
@@ -50,6 +107,7 @@ def cmd_subscribe(args):
         feeds = {}
 
     url = args.url
+    _validate_feed_url(url)
     if url in feeds:
         stderr(f"Already subscribed to {url}")
         sys.exit(1)
@@ -122,8 +180,14 @@ def parse_entry_date(entry) -> str | None:
     return None
 
 
+MAX_ENTRY_ID_LEN = 512
+MAX_SEEN_PER_FEED = 5000
+
+
 def entry_id(entry) -> str:
-    return entry.get("id") or entry.get("link") or entry.get("title", "")
+    eid = entry.get("id") or entry.get("link") or entry.get("title", "")
+    # Truncate overly long IDs to prevent state file bloat
+    return eid[:MAX_ENTRY_ID_LEN] if len(eid) > MAX_ENTRY_ID_LEN else eid
 
 
 def truncate(text: str, length: int = 300) -> str:
@@ -171,7 +235,39 @@ def cmd_fetch(args):
         seen = set(state.get(url, []))
 
         stderr(f"Fetching {feed_name}...")
-        parsed = feedparser.parse(url)
+        # Re-validate URL on every fetch and get pinned IP (prevents DNS rebinding)
+        try:
+            pinned_ip = _validate_feed_url(url)
+        except SystemExit:
+            stderr(f"  Skipping {feed_name}: URL validation failed")
+            continue
+        from urllib.parse import urlparse as _urlparse
+        _host = _urlparse(url).hostname
+        # Fetch content ourselves with connect-time IP pinning to prevent DNS-rebinding TOCTOU
+        # Stream with 2MB cap to prevent memory exhaustion from malicious feeds
+        MAX_FEED_SIZE = 2 * 1024 * 1024
+        try:
+            with _pinned_dns(_host, pinned_ip):
+                resp = requests.get(url, timeout=30, allow_redirects=False, stream=True)
+            resp.raise_for_status()
+            chunks = []
+            total = 0
+            for chunk in resp.iter_content(chunk_size=8192):
+                total += len(chunk)
+                if total > MAX_FEED_SIZE:
+                    resp.close()
+                    stderr(f"  Skipping {feed_name}: response exceeds {MAX_FEED_SIZE} bytes")
+                    break
+                chunks.append(chunk)
+            else:
+                # Only parse if we didn't break out of the loop
+                feed_content = b"".join(chunks)
+                parsed = feedparser.parse(feed_content)
+            if total > MAX_FEED_SIZE:
+                continue
+        except requests.RequestException as e:
+            stderr(f"  Error fetching {feed_name}: {e}")
+            continue
 
         if parsed.bozo and not parsed.entries:
             stderr(f"  Error fetching {feed_name}: {parsed.bozo_exception}")
@@ -207,8 +303,11 @@ def cmd_fetch(args):
                 "summary": truncate(summary),
             })
 
-        # Update state
-        state[url] = list(new_seen)
+        # Update state (cap per-feed to prevent unbounded growth)
+        seen_list = list(new_seen)
+        if len(seen_list) > MAX_SEEN_PER_FEED:
+            seen_list = seen_list[-MAX_SEEN_PER_FEED:]
+        state[url] = seen_list
 
     # Sort by published date descending (newest first), None dates last
     results.sort(key=lambda x: x.get("published") or "", reverse=True)

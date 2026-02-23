@@ -29,11 +29,14 @@ jobs:
           pip install anthropic
       
       - name: 📋 Start Inspection
+        env:
+          DATASET_DESC: ${{ github.event.inputs.dataset_description }}
+          INSPECTION_Q: ${{ github.event.inputs.inspection_question }}
         run: |
           echo "## 📊 Dataset Inspection Certificate" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Dataset Type:** ${{ github.event.inputs.dataset_description }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Inspection Question:** ${{ github.event.inputs.inspection_question }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Dataset Type:** $DATASET_DESC" >> $GITHUB_STEP_SUMMARY
+          echo "**Inspection Question:** $INSPECTION_Q" >> $GITHUB_STEP_SUMMARY
           echo "**Timestamp:** $(date -Iseconds)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
       
@@ -85,7 +88,8 @@ jobs:
 {dataset}
 </dataset>
 
-Analyze the dataset above and answer the question. Be specific with numbers and themes."""
+Analyze the dataset above and answer the question. Be specific with numbers and themes.
+IMPORTANT: Do NOT reproduce raw dataset records in your response. Provide only aggregate statistics, counts, and thematic summaries."""
           
           response = client.messages.create(
               model="claude-sonnet-4",
@@ -116,58 +120,68 @@ Analyze the dataset above and answer the question. Be specific with numbers and 
       
       - name: 📜 Generate Certificate
         if: success()
+        env:
+          INSPECTION_Q: ${{ github.event.inputs.inspection_question }}
+          DS_HASH: ${{ steps.load.outputs.hash }}
+          DS_SIZE: ${{ steps.load.outputs.size }}
+          DS_LINES: ${{ steps.load.outputs.lines }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
         run: |
-          cat << 'EOF' >> $GITHUB_STEP_SUMMARY
-          
+          cat >> $GITHUB_STEP_SUMMARY <<CERT_EOF
+
           ## ✅ Inspection Complete
-          
+
           ### Dataset Metadata:
-          - **Hash:** `${{ steps.load.outputs.hash }}`
-          - **Size:** ${{ steps.load.outputs.size }} bytes
-          - **Lines:** ${{ steps.load.outputs.lines }}
+          - **Hash:** \`${DS_HASH}\`
+          - **Size:** ${DS_SIZE} bytes
+          - **Lines:** ${DS_LINES}
           - **Content:** ❌ NOT LOGGED (private)
-          
+
           ### Inspection Question:
-          > ${{ github.event.inputs.inspection_question }}
-          
+          > ${INSPECTION_Q}
+
           ### LLM Analysis:
           See "Inspect with LLM" step above for full analysis.
-          
+
           ### Privacy Guarantees:
           - ❌ Raw dataset NEVER logged
           - ✅ Only hash + analysis result visible
           - ✅ Dataset deleted (runner destroyed)
           - ✅ GitHub Secrets remain encrypted
-          
+
           ### Use Case:
           This certificate proves claims about the dataset WITHOUT revealing its contents.
           Perfect for:
           - **Pre-buy inspection:** Verify data quality before purchase
           - **Data marketplace:** Prove relevance without exposure
           - **Research validation:** Verify dataset properties
-          
+
           ### Trust Model:
           - ✅ GitHub infrastructure (ephemeral runners)
           - ✅ Open source workflow (auditable)
           - ✅ Public analysis result
           - ❌ Private dataset (never exposed)
-          
+
           ### Proof:
-          - **Certificate URL:** https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          - **Dataset Hash:** `${{ steps.load.outputs.hash }}`
+          - **Certificate URL:** https://github.com/${REPO}/actions/runs/${RUN_ID}
+          - **Dataset Hash:** \`${DS_HASH}\`
           - **Timestamp:** $(date -Iseconds)
-          
+
           ---
-          
+
           **Inspection Certificate powered by GitHub Actions** 🦞
-          
+
           This proves the dataset has the claimed properties!
-          EOF
+          CERT_EOF
       
       - name: 🎉 Success
         if: success()
+        env:
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
         run: |
           echo "🎉 Dataset inspection certificate generated!"
-          echo "📋 View at: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          echo "📋 View at: https://github.com/${REPO}/actions/runs/${RUN_ID}"
           echo ""
           echo "Share this URL to prove your dataset's value (without revealing it)"

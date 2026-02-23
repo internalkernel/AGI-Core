@@ -121,19 +121,21 @@ class LocalSemanticMemory:
         self.agent_id = self._detect_agent_id()
         print(f"🤖 Agent ID: {self.agent_id}")
 
-        # Ensure workspace exists
+        # Ensure workspace exists with restricted permissions
         if not self.workspace_path.exists():
             print(f"⚠️  Workspace not found: {self.workspace_path}")
             print(f"   Creating workspace directory...")
-            self.workspace_path.mkdir(parents=True, exist_ok=True)
+            self.workspace_path.mkdir(parents=True, exist_ok=True, mode=0o700)
+        else:
+            self.workspace_path.chmod(0o700)
 
         # Vector DB location (within workspace)
         self.vector_db_path = self.workspace_path / "vector_db"
-        self.vector_db_path.mkdir(parents=True, exist_ok=True)
+        self.vector_db_path.mkdir(parents=True, exist_ok=True, mode=0o700)
 
         # Memory logs location
         self.memory_path = self.workspace_path / "memory"
-        self.memory_path.mkdir(parents=True, exist_ok=True)
+        self.memory_path.mkdir(parents=True, exist_ok=True, mode=0o700)
 
         # Initialize lock for concurrent access
         from filelock import FileLock
@@ -246,10 +248,11 @@ class LocalSemanticMemory:
             )
 
             if not is_valid:
-                print(f"⚠️  Warning: Workspace is outside standard OpenClaw directories")
-                print(f"   Path: {workspace_path_resolved}")
-                print(f"   Expected under: {openclaw_base}")
-                # Allow but warn - don't fail, as user may have custom setup
+                print(f"❌ Error: Workspace is outside standard OpenClaw directories", file=sys.stderr)
+                print(f"   Path: {workspace_path_resolved}", file=sys.stderr)
+                print(f"   Expected under: {openclaw_base}", file=sys.stderr)
+                print(f"   Use --workspace with a path under ~/.openclaw/ or set OPENCLAW_WORKSPACE", file=sys.stderr)
+                sys.exit(1)
         except Exception as e:
             print(f"⚠️  Could not validate workspace path: {e}")
 
@@ -907,7 +910,13 @@ class LocalSemanticMemory:
         cutoff = datetime.now() - timedelta(days=days)
 
         log_files = []
+        memory_path_resolved = self.memory_path.resolve()
         for log_file in self.memory_path.glob("*.md"):
+            # Skip symlinks and files that resolve outside the memory directory
+            if log_file.is_symlink():
+                continue
+            if not str(log_file.resolve()).startswith(str(memory_path_resolved) + os.sep):
+                continue
             try:
                 # Parse date from filename (YYYY-MM-DD.md)
                 date_str = log_file.stem

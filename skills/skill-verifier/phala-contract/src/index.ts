@@ -14,6 +14,17 @@ interface InspectionCertificate {
 
 // In-memory storage (will persist in Phala KV store)
 const certificates = new Map<string, InspectionCertificate>();
+const MAX_CERTIFICATES = 10000;
+
+/** Escape HTML special characters to prevent XSS */
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#x27;');
+}
 
 /**
  * Generate a simple inspection certificate
@@ -28,6 +39,14 @@ export function createCertificate(params: {
 }): string {
   const id = `cert_${Date.now()}_${Math.random().toString(36).slice(2)}`;
   
+  const timestamp = Date.now();
+  // HMAC-like construction: H(K ^ opad || H(K ^ ipad || message))
+  // pink.ext() only exposes hash() and deriveSecret(), so we use a keyed double-hash
+  const secretKey = pink.ext().deriveSecret("attestation_key");
+  const payload = `${id}|${params.type}|${params.claimant}|${params.inputHash}|${params.result}|${timestamp}`;
+  const innerHash = pink.ext().hash(secretKey + "|inner|" + payload);
+  const attestation = pink.ext().hash(secretKey + "|outer|" + innerHash);
+
   const cert: InspectionCertificate = {
     id,
     type: params.type as any,
@@ -35,12 +54,25 @@ export function createCertificate(params: {
     inputHash: params.inputHash,
     inspectionPrompt: params.prompt,
     result: params.result,
-    timestamp: Date.now(),
-    attestation: pink.ext().deriveSecret("attestation_key") // Simple attestation for now
+    timestamp,
+    attestation, // Signature proof, NOT raw secret material
   };
   
+  // Evict oldest certificates if at capacity
+  if (certificates.size >= MAX_CERTIFICATES) {
+    let oldest: string | null = null;
+    let oldestTs = Infinity;
+    for (const [key, c] of certificates) {
+      if (c.timestamp < oldestTs) {
+        oldestTs = c.timestamp;
+        oldest = key;
+      }
+    }
+    if (oldest) certificates.delete(oldest);
+  }
+
   certificates.set(id, cert);
-  
+
   return id;
 }
 
@@ -62,8 +94,17 @@ export function listCertificates(): InspectionCertificate[] {
  * HTTP handler - serves certificates as HTML
  */
 export default function main(request: string): string {
-  const req = JSON.parse(request);
-  
+  let req: any;
+  try {
+    req = JSON.parse(request);
+  } catch {
+    return JSON.stringify({
+      statusCode: 400,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ error: "Invalid JSON request" })
+    });
+  }
+
   // Parse simple HTTP-like request
   const path = req.path || "/";
   const method = req.method || "GET";
@@ -97,11 +138,72 @@ export default function main(request: string): string {
     });
   }
   
-  // Route: POST /create
+  // Route: POST /create (requires API key)
   if (method === "POST" && path === "/create") {
-    const body = JSON.parse(req.body || "{}");
+    const apiKey = req.headers?.["x-api-key"] || req.headers?.["authorization"]?.replace("Bearer ", "");
+    const expectedKey = pink.ext().deriveSecret("api_auth_key");
+    // Constant-time comparison: hash both values and compare hashes to prevent timing attacks
+    if (!apiKey || pink.ext().hash("compare|" + apiKey) !== pink.ext().hash("compare|" + expectedKey)) {
+      return JSON.stringify({
+        statusCode: 401,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ error: "Unauthorized" })
+      });
+    }
+    let body: any;
+    try {
+      body = JSON.parse(req.body || "{}");
+    } catch {
+      return JSON.stringify({
+        statusCode: 400,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ error: "Invalid JSON body" })
+      });
+    }
+    if (!body.type || !body.claimant || !body.inputHash || !body.prompt || !body.result) {
+      return JSON.stringify({
+        statusCode: 400,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ error: "Missing required fields: type, claimant, inputHash, prompt, result" })
+      });
+    }
+    // Strict type validation to prevent runtime errors from non-string values
+    const VALID_TYPES = ["skill", "data", "credential"];
+    if (typeof body.type !== "string" || typeof body.claimant !== "string" ||
+        typeof body.inputHash !== "string" || typeof body.prompt !== "string" ||
+        typeof body.result !== "string") {
+      return JSON.stringify({
+        statusCode: 400,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ error: "All fields must be strings" })
+      });
+    }
+    if (!VALID_TYPES.includes(body.type)) {
+      return JSON.stringify({
+        statusCode: 400,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ error: `type must be one of: ${VALID_TYPES.join(", ")}` })
+      });
+    }
+    // Enforce per-field size limits to prevent memory exhaustion
+    const MAX_FIELD = 2000; // 2KB per field
+    const MAX_SHORT = 256;
+    if (body.type.length > MAX_SHORT || body.claimant.length > MAX_SHORT || body.inputHash.length > MAX_SHORT) {
+      return JSON.stringify({
+        statusCode: 400,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ error: `Fields type/claimant/inputHash must be <= ${MAX_SHORT} chars` })
+      });
+    }
+    if (body.prompt.length > MAX_FIELD || body.result.length > MAX_FIELD) {
+      return JSON.stringify({
+        statusCode: 400,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ error: `Fields prompt/result must be <= ${MAX_FIELD} chars` })
+      });
+    }
     const id = createCertificate(body);
-    
+
     return JSON.stringify({
       statusCode: 200,
       headers: { "Content-Type": "application/json" },
@@ -109,9 +211,25 @@ export default function main(request: string): string {
     });
   }
   
-  // Route: GET /certificates (list all)
+  // Route: GET /certificates (list all — requires auth, redacted summary, no sensitive prompt/result data)
   if (method === "GET" && path === "/certificates") {
-    const certs = listCertificates();
+    const listApiKey = req.headers?.["x-api-key"] || req.headers?.["authorization"]?.replace("Bearer ", "");
+    const listExpectedKey = pink.ext().deriveSecret("api_auth_key");
+    if (!listApiKey || pink.ext().hash("compare|" + listApiKey) !== pink.ext().hash("compare|" + listExpectedKey)) {
+      return JSON.stringify({
+        statusCode: 401,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ error: "Unauthorized" })
+      });
+    }
+    const certs = listCertificates().map(c => ({
+      id: c.id,
+      type: c.type,
+      claimant: c.claimant,
+      inputHash: c.inputHash,
+      timestamp: c.timestamp,
+      // Omit inspectionPrompt, result, and attestation from list view
+    }));
     return JSON.stringify({
       statusCode: 200,
       headers: { "Content-Type": "application/json" },
@@ -229,20 +347,20 @@ function renderHomePage(): string {
   ` : certs.map(cert => `
     <div class="cert-card">
       <div>
-        <span class="badge badge-${cert.type}">${cert.type}</span>
-        <span class="timestamp">${new Date(cert.timestamp).toISOString()}</span>
+        <span class="badge badge-${escapeHtml(cert.type)}">${escapeHtml(cert.type)}</span>
+        <span class="timestamp">${escapeHtml(new Date(cert.timestamp).toISOString())}</span>
       </div>
       <div style="margin-top: 10px;">
-        <strong>Certificate ID:</strong> <span class="cert-id">${cert.id}</span>
+        <strong>Certificate ID:</strong> <span class="cert-id">${escapeHtml(cert.id)}</span>
       </div>
       <div style="margin-top: 10px;">
-        <strong>Input Hash:</strong> <span class="hash">${cert.inputHash.slice(0, 16)}...${cert.inputHash.slice(-16)}</span>
+        <strong>Input Hash:</strong> <span class="hash">${escapeHtml(cert.inputHash.slice(0, 16))}...${escapeHtml(cert.inputHash.slice(-16))}</span>
       </div>
       <div style="margin-top: 10px;">
-        <strong>Result:</strong> ${cert.result.slice(0, 200)}${cert.result.length > 200 ? '...' : ''}
+        <strong>Result:</strong> [Full content available via authenticated API]
       </div>
       <div style="margin-top: 15px;">
-        <a href="/certificate/${cert.id}">View Full Certificate →</a>
+        <a href="/certificate/${encodeURIComponent(cert.id)}">View Full Certificate →</a>
       </div>
     </div>
   `).join('')}
@@ -267,7 +385,7 @@ function renderCertificate(cert: InspectionCertificate): string {
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Certificate ${cert.id} - Inspection Certificates</title>
+  <title>Certificate ${escapeHtml(cert.id)} - Inspection Certificates</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
     body {
@@ -350,47 +468,47 @@ function renderCertificate(cert: InspectionCertificate): string {
   
   <div class="field">
     <div class="field-label">Certificate ID</div>
-    <div class="field-value mono">${cert.id}</div>
+    <div class="field-value mono">${escapeHtml(cert.id)}</div>
   </div>
-  
+
   <div class="field">
     <div class="field-label">Type</div>
     <div class="field-value">
-      <span class="badge badge-${cert.type}">${cert.type}</span>
+      <span class="badge badge-${escapeHtml(cert.type)}">${escapeHtml(cert.type)}</span>
     </div>
   </div>
-  
+
   <div class="field">
     <div class="field-label">Claimant</div>
-    <div class="field-value mono">${cert.claimant}</div>
+    <div class="field-value mono">${escapeHtml(cert.claimant)}</div>
   </div>
-  
+
   <div class="field">
     <div class="field-label">Input Hash (SHA256)</div>
-    <div class="field-value mono">${cert.inputHash}</div>
+    <div class="field-value mono">${escapeHtml(cert.inputHash)}</div>
   </div>
-  
+
   <div class="field">
     <div class="field-label">Inspection Prompt</div>
-    <div class="field-value">${cert.inspectionPrompt}</div>
+    <div class="field-value">[Full content available via authenticated API]</div>
   </div>
-  
+
   <h2>Inspection Result</h2>
-  
+
   <div class="field">
-    <div class="field-value">${cert.result}</div>
+    <div class="field-value">[Full content available via authenticated API]</div>
   </div>
-  
+
   <h2>Verification</h2>
-  
+
   <div class="field">
     <div class="field-label">Timestamp</div>
-    <div class="field-value">${new Date(cert.timestamp).toISOString()}</div>
+    <div class="field-value">${escapeHtml(new Date(cert.timestamp).toISOString())}</div>
   </div>
-  
+
   <div class="field">
     <div class="field-label">Phala Attestation</div>
-    <div class="field-value mono">${cert.attestation.slice(0, 64)}...</div>
+    <div class="field-value mono">${escapeHtml(cert.attestation.slice(0, 64))}...</div>
   </div>
   
   <div class="field">

@@ -81,7 +81,41 @@ def run_aws(profile_alias: str, args: list[str], region_override: str | None = N
         "--output", "json",
     ] + args
 
-    stderr(f"$ {' '.join(cmd)}")
+    # Redact all flag values by default; only show values for safe display flags
+    SAFE_DISPLAY_FLAGS = {
+        "--profile", "--region", "--output", "--query",
+        "--max-items", "--page-size", "--starting-token",
+        "--no-paginate", "--filter", "--filters",
+        "--instance-ids", "--stack-name", "--table-name",
+        "--bucket", "--key", "--prefix", "--delimiter",
+        "--function-name", "--cluster", "--service",
+    }
+    display_cmd = []
+    skip_next = False
+    redact_next = False
+    for i, a in enumerate(cmd):
+        if skip_next:
+            display_cmd.append(a)
+            skip_next = False
+        elif redact_next:
+            display_cmd.append("****")
+            redact_next = False
+        elif a.startswith("--") and "=" in a:
+            # Handle --flag=value form
+            flag_part = a.split("=", 1)[0]
+            if flag_part.lower() in SAFE_DISPLAY_FLAGS:
+                display_cmd.append(a)
+            else:
+                display_cmd.append(f"{flag_part}=****")
+        elif a.startswith("--"):
+            display_cmd.append(a)
+            if a.lower() in SAFE_DISPLAY_FLAGS:
+                skip_next = True
+            else:
+                redact_next = True
+        else:
+            display_cmd.append(a)
+    stderr(f"$ {' '.join(display_cmd)}")
 
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)

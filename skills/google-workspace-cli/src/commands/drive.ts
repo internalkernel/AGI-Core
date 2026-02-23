@@ -4,6 +4,27 @@ import { getAuthenticatedClient } from '../lib/auth.js';
 import { getActiveProfile } from '../lib/config.js';
 import { formatFileList, print, printSuccess, printError } from '../lib/output.js';
 import type { GlobalOptions } from '../types/index.js';
+import { resolve, relative, dirname } from 'path';
+import { realpathSync, existsSync } from 'fs';
+
+/** Validate output path stays within CWD (prevents arbitrary file write via symlinks) */
+function safeOutputPath(outputPath: string): string {
+  const resolved = resolve(outputPath);
+  const realCwd = realpathSync(process.cwd());
+  // Lexical check first
+  if (!resolved.startsWith(realCwd + '/') && resolved !== realCwd) {
+    throw new Error(`Output path '${outputPath}' must be within the current working directory`);
+  }
+  // Resolve symlinks in the parent directory to prevent symlink-based escape
+  const parentDir = dirname(resolved);
+  if (existsSync(parentDir)) {
+    const realParent = realpathSync(parentDir);
+    if (!realParent.startsWith(realCwd + '/') && realParent !== realCwd) {
+      throw new Error(`Output path '${outputPath}' resolves outside the current working directory (symlink detected)`);
+    }
+  }
+  return resolved;
+}
 
 interface DriveListOptions extends GlobalOptions {
   folder?: string;
@@ -103,8 +124,9 @@ export function registerDriveCommands(program: Command): void {
           outputPath = metadata.name;
         }
 
-        await client.download(fileId, outputPath);
-        printSuccess(`Downloaded to: ${outputPath}`);
+        const safePath = safeOutputPath(outputPath);
+        await client.download(fileId, safePath);
+        printSuccess(`Downloaded to: ${safePath}`);
       } catch (error) {
         printError('Error downloading file: ' + (error instanceof Error ? error.message : String(error)));
         process.exit(1);
@@ -133,8 +155,9 @@ export function registerDriveCommands(program: Command): void {
           outputPath = `${baseName}.${options.format}`;
         }
 
-        await client.export(fileId, options.format, outputPath);
-        printSuccess(`Exported to: ${outputPath}`);
+        const safePath = safeOutputPath(outputPath);
+        await client.export(fileId, options.format, safePath);
+        printSuccess(`Exported to: ${safePath}`);
       } catch (error) {
         printError('Error exporting file: ' + (error instanceof Error ? error.message : String(error)));
         process.exit(1);

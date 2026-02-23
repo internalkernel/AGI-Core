@@ -13,7 +13,7 @@ echo ""
 
 # Create workspaces directory (for shared memory only)
 echo "📁 Creating workspace directory structure..."
-mkdir -p "$WORKSPACES_DIR"
+mkdir -p -m 700 "$WORKSPACES_DIR"
 
 # Define agents
 # NOTE: OpenClaw profile-based agents use ~/.openclaw/workspace-<name>/
@@ -33,14 +33,14 @@ for agent in "${agents[@]}"; do
         echo "  ✓ Workspace exists: $agent"
     else
         echo "  + Creating workspace: $agent"
-        mkdir -p "$workspace"
+        mkdir -p -m 700 "$workspace"
     fi
 
     # Create subdirectories
-    mkdir -p "$workspace/memory"
-    mkdir -p "$workspace/vector_db"
-    mkdir -p "$workspace/logs"
-    mkdir -p "$workspace/cache"
+    mkdir -p -m 700 "$workspace/memory"
+    mkdir -p -m 700 "$workspace/vector_db"
+    mkdir -p -m 700 "$workspace/logs"
+    mkdir -p -m 700 "$workspace/cache"
 
     # Create a README for each workspace
     cat > "$workspace/README.md" << EOF
@@ -84,9 +84,9 @@ if [ -d "$shared" ]; then
     echo "  ✓ Workspace exists: shared"
 else
     echo "  + Creating workspace: shared"
-    mkdir -p "$shared"
+    mkdir -p -m 700 "$shared"
 fi
-mkdir -p "$shared/memory" "$shared/vector_db" "$shared/logs" "$shared/cache"
+mkdir -p -m 700 "$shared/memory" "$shared/vector_db" "$shared/logs" "$shared/cache"
 cat > "$shared/README.md" << EOF
 # Shared Memory Workspace
 

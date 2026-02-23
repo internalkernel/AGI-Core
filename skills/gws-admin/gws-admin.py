@@ -64,7 +64,11 @@ def ensure_gam_env() -> dict[str, str]:
     return env
 
 
-def run_gam(args: list[str], *, capture: bool = True, env: dict | None = None) -> subprocess.CompletedProcess:
+def run_gam(args: list[str], *, capture: bool = True, env: dict | None = None,
+            password: str | None = None) -> subprocess.CompletedProcess:
+    """Run a GAM command. If password is provided, it's written to a tempfile
+    and passed via GAM's 'password file:<path>' syntax to avoid exposure in
+    the process argument list (visible via /proc/cmdline)."""
     gam = get_gam_path()
     if not gam:
         print("ERROR: GAM is not installed. Run 'gws-admin.py setup' first.", file=sys.stderr)
@@ -72,10 +76,26 @@ def run_gam(args: list[str], *, capture: bool = True, env: dict | None = None) -
     cmd = [gam] + args
     if env is None:
         env = ensure_gam_env()
-    if capture:
-        return subprocess.run(cmd, capture_output=True, text=True, env=env)
-    else:
-        return subprocess.run(cmd, text=True, env=env)
+    # Use tempfile for password to avoid /proc exposure
+    pw_tmpfile = None
+    if password:
+        import tempfile
+        pw_tmpfile = tempfile.NamedTemporaryFile(mode="w", suffix=".pw", delete=False)
+        pw_tmpfile.write(password)
+        pw_tmpfile.close()
+        os.chmod(pw_tmpfile.name, 0o600)
+        cmd.extend(["password", f"file:{pw_tmpfile.name}"])
+    try:
+        if capture:
+            return subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=300)
+        else:
+            return subprocess.run(cmd, text=True, env=env, timeout=300)
+    finally:
+        if pw_tmpfile:
+            try:
+                os.unlink(pw_tmpfile.name)
+            except OSError:
+                pass
 
 
 def gam_output_to_json(stdout: str) -> list[dict]:
@@ -121,9 +141,25 @@ def check_confirm(args, operation: str) -> bool:
     return True
 
 
+def _redact_gam_args(gam_args: list[str]) -> list[str]:
+    """Redact password values from GAM argument lists for display."""
+    redacted = []
+    skip_next = False
+    for arg in gam_args:
+        if skip_next:
+            redacted.append("****")
+            skip_next = False
+        elif arg == "password":
+            redacted.append(arg)
+            skip_next = True
+        else:
+            redacted.append(arg)
+    return redacted
+
+
 def print_dry_run(gam_args: list[str]):
     print("[DRY RUN] Would execute:")
-    print(f"  gam {' '.join(gam_args)}")
+    print(f"  gam {' '.join(_redact_gam_args(gam_args))}")
 
 
 # --- Setup ---
@@ -152,7 +188,9 @@ def cmd_setup(args):
             sys.exit(1)
 
     # Step 2: Create config directory
-    GAM_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    GAM_CONFIG_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+    # Ensure restrictive permissions on credential directory
+    GAM_CONFIG_DIR.chmod(0o700)
     print(f"\n[OK] Config directory: {GAM_CONFIG_DIR}")
 
     env = ensure_gam_env()
@@ -303,14 +341,21 @@ def cmd_users(args):
             gam_args.extend(["firstname", args.firstname])
         if args.lastname:
             gam_args.extend(["lastname", args.lastname])
-        if args.password:
-            gam_args.extend(["password", args.password])
+        # Resolve password: --password value, or GWS_USER_PASSWORD env, or stdin if "-"
+        password = args.password
+        if password == "-":
+            import getpass
+            password = getpass.getpass("Enter password: ")
+        elif not password:
+            password = os.environ.get("GWS_USER_PASSWORD")
         if args.org:
             gam_args.extend(["org", args.org])
         if getattr(args, "dry_run", False):
+            if password:
+                gam_args.extend(["password", "****"])
             print_dry_run(gam_args)
             return
-        result = run_gam(gam_args)
+        result = run_gam(gam_args, password=password)
         if result.returncode != 0:
             print(f"ERROR: {result.stderr}", file=sys.stderr)
             sys.exit(1)
@@ -322,15 +367,20 @@ def cmd_users(args):
             gam_args.extend(["suspended", args.suspended])
         if args.org:
             gam_args.extend(["org", args.org])
-        if args.password:
-            gam_args.extend(["password", args.password])
-        if len(gam_args) == 3:
+        # Resolve password: --password value, or stdin if "-"
+        password = args.password
+        if password == "-":
+            import getpass
+            password = getpass.getpass("Enter new password: ")
+        if len(gam_args) == 3 and not password:
             print("ERROR: No update fields specified. Use --suspended, --org, or --password.", file=sys.stderr)
             sys.exit(1)
         if getattr(args, "dry_run", False):
+            if password:
+                gam_args.extend(["password", "****"])
             print_dry_run(gam_args)
             return
-        result = run_gam(gam_args)
+        result = run_gam(gam_args, password=password)
         if result.returncode != 0:
             print(f"ERROR: {result.stderr}", file=sys.stderr)
             sys.exit(1)
@@ -577,7 +627,7 @@ def cmd_raw(args):
     if not gam_args:
         print("ERROR: No GAM arguments provided.", file=sys.stderr)
         sys.exit(1)
-    print(f"[RAW] Executing: gam {' '.join(gam_args)}")
+    print(f"[RAW] Executing: gam {' '.join(_redact_gam_args(gam_args))}")
     result = run_gam(gam_args, capture=False)
     sys.exit(result.returncode)
 
@@ -624,14 +674,14 @@ def build_parser() -> argparse.ArgumentParser:
     users_create.add_argument("email", help="User email address")
     users_create.add_argument("--firstname", required=True, help="First name")
     users_create.add_argument("--lastname", required=True, help="Last name")
-    users_create.add_argument("--password", required=True, help="Initial password")
+    users_create.add_argument("--password", help="Initial password (use '-' for stdin prompt, or set GWS_USER_PASSWORD env var)")
     users_create.add_argument("--org", help="Org unit path (e.g., /Engineering)")
 
     users_update = users_sub.add_parser("update", help="Update user attributes")
     users_update.add_argument("email", help="User email address")
     users_update.add_argument("--suspended", choices=["on", "off"], help="Suspend or unsuspend user")
     users_update.add_argument("--org", help="Move to org unit path")
-    users_update.add_argument("--password", help="Set new password")
+    users_update.add_argument("--password", help="Set new password (use '-' for stdin prompt)")
 
     users_delete = users_sub.add_parser("delete", help="Delete a user (requires --confirm)")
     users_delete.add_argument("email", help="User email address")

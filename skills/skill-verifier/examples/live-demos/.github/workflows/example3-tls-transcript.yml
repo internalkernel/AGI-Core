@@ -15,22 +15,52 @@ jobs:
     
     steps:
       - name: 📋 Start Verification
+        env:
+          SOURCE_URL: ${{ github.event.inputs.source_url }}
         run: |
           echo "## 🔐 TLS Transcript Verification Certificate" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Source URL:** ${{ github.event.inputs.source_url }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Source URL:** $SOURCE_URL" >> $GITHUB_STEP_SUMMARY
           echo "**Timestamp:** $(date -Iseconds)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
       
       - name: 🌐 Fetch via TLS
         id: fetch
+        env:
+          SOURCE_URL: ${{ github.event.inputs.source_url }}
         run: |
-          echo "🌐 Fetching ${{ github.event.inputs.source_url }} via TLS..."
+          # Validate URL scheme (prevent non-http/https)
+          if [[ ! "$SOURCE_URL" =~ ^https?:// ]]; then
+            echo "Error: Only http/https URLs are allowed."
+            exit 1
+          fi
+
+          # Extract hostname using Python for robust URL parsing (handles IPv6, ports, edge cases)
+          # Use env var (not string interpolation) to prevent injection via crafted URL
+          HOSTNAME=$(python3 -c "import os; from urllib.parse import urlparse; print(urlparse(os.environ['SOURCE_URL']).hostname or '')")
+          if [[ -z "$HOSTNAME" ]]; then
+            echo "Error: Could not extract hostname from URL."
+            exit 1
+          fi
+          # Resolve ALL addresses and reject any private/internal IPs (fail closed)
+          ALL_IPS=$(getent ahosts "$HOSTNAME" 2>/dev/null | awk '{print $1}' | sort -u)
+          if [[ -z "$ALL_IPS" ]]; then
+            echo "Error: DNS resolution failed for $HOSTNAME. Blocked."
+            exit 1
+          fi
+          while IFS= read -r RESOLVED_IP; do
+            if [[ "$RESOLVED_IP" =~ ^(127\.|10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|169\.254\.|0\.|100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.|::1|fe80|fc|fd) ]]; then
+              echo "Error: URL resolves to private/internal IP ($RESOLVED_IP). Blocked."
+              exit 1
+            fi
+          done <<< "$ALL_IPS"
+
+          echo "🌐 Fetching $SOURCE_URL via TLS..."
           echo ""
-          
-          # Fetch with verbose TLS info
-          curl -v --silent "${{ github.event.inputs.source_url }}" > transcript.html 2> tls_log.txt
-          
+
+          # Fetch with verbose TLS info, no redirect following (URL passed via env, not shell interpolation)
+          curl -v --silent --max-redirs 0 -- "$SOURCE_URL" > transcript.html 2> tls_log.txt
+
           echo "✅ Fetch complete!"
           echo ""
       
@@ -99,63 +129,72 @@ jobs:
       
       - name: 📜 Generate Certificate
         if: success()
+        env:
+          SOURCE_URL: ${{ github.event.inputs.source_url }}
+          HASH: ${{ steps.hash.outputs.hash }}
+          SIZE: ${{ steps.hash.outputs.size }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
         run: |
-          cat << 'EOF' >> $GITHUB_STEP_SUMMARY
-          
+          cat >> $GITHUB_STEP_SUMMARY <<CERT_EOF
+
           ## ✅ TLS Transcript Verified
-          
+
           ### Source Information:
-          - **URL:** ${{ github.event.inputs.source_url }}
+          - **URL:** ${SOURCE_URL}
           - **Fetched:** $(date -Iseconds)
           - **TLS:** ✅ Verified secure connection
-          
+
           ### Transcript Hash:
-          - **SHA256:** `${{ steps.hash.outputs.hash }}`
-          - **Size:** ${{ steps.hash.outputs.size }} bytes
+          - **SHA256:** \`${HASH}\`
+          - **Size:** ${SIZE} bytes
           - **Content:** See analysis above
-          
+
           ### What This Proves:
           1. ✅ **Authentic source:** Fetched from claimed URL
           2. ✅ **TLS verified:** Secure connection confirmed
           3. ✅ **Content hash:** Cryptographic fingerprint
           4. ✅ **Timestamp:** Proven fetch time
           5. ❌ **Full content:** NOT revealed (only hash + analysis)
-          
+
           ### Use Cases:
           - **Data provenance:** Prove data came from authentic source
           - **Research validation:** Verify data collection method
           - **Compliance:** Show data was fetched securely
           - **Archival:** Prove historical snapshot
-          
+
           ### Trust Model:
           - ✅ GitHub runner (ephemeral, isolated)
           - ✅ TLS verification (certificate chain validated)
           - ✅ Public logs (anyone can audit)
           - ✅ Hash proof (content fingerprint)
-          
+
           ### Verification:
           Anyone can:
           1. Check TLS certificate in logs
           2. Verify hash by refetching URL
           3. Confirm LLM analysis makes sense
           4. Audit workflow code
-          
+
           ### Proof:
-          - **Certificate URL:** https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          - **Transcript Hash:** `${{ steps.hash.outputs.hash }}`
+          - **Certificate URL:** https://github.com/${REPO}/actions/runs/${RUN_ID}
+          - **Transcript Hash:** \`${HASH}\`
           - **Timestamp:** $(date -Iseconds)
-          
+
           ---
-          
+
           **Inspection Certificate powered by GitHub Actions** 🦞
-          
+
           This proves the transcript is authentic and from the claimed source!
-          EOF
-      
+          CERT_EOF
+
       - name: 🎉 Success
         if: success()
+        env:
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
         run: |
           echo "🎉 TLS transcript verification certificate generated!"
-          echo "📋 View at: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          echo "📋 View at: https://github.com/${REPO}/actions/runs/${RUN_ID}"
           echo ""
           echo "Share this URL to prove your data came from an authentic TLS source"

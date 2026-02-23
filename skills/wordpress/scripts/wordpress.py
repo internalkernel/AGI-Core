@@ -56,6 +56,50 @@ def stderr(*args, **kwargs):
     print(*args, file=sys.stderr, **kwargs)
 
 
+def _resolve_and_validate(hostname: str) -> str:
+    """Resolve hostname, validate all IPs are global, return first valid IP for pinning."""
+    import ipaddress
+    import socket
+    try:
+        results = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+    except socket.gaierror as e:
+        stderr(f"Error: DNS resolution failed for {hostname}: {e}")
+        sys.exit(1)
+    first_ip = None
+    for info in results:
+        addr = ipaddress.ip_address(info[4][0])
+        if not addr.is_global:
+            stderr(f"Error: URL resolves to non-global IP ({addr}): {hostname}")
+            sys.exit(1)
+        if first_ip is None:
+            first_ip = str(addr)
+    if first_ip is None:
+        stderr(f"Error: No addresses resolved for {hostname}")
+        sys.exit(1)
+    return first_ip
+
+
+def _validate_site_url(url: str) -> str | None:
+    """Validate site URL and return pinned IP. Must be https, reject internal/private targets."""
+    from urllib.parse import urlparse
+    import re
+    parsed = urlparse(url)
+    if parsed.scheme != "https":
+        stderr(f"Error: Only https URLs are allowed (got '{parsed.scheme}'). WordPress app passwords must not be sent over plaintext HTTP.")
+        sys.exit(1)
+    host = (parsed.hostname or "").lower()
+    if host in ("localhost", "127.0.0.1", "0.0.0.0", "::1", "[::1]"):
+        stderr(f"Error: Loopback URLs are not allowed: {url}")
+        sys.exit(1)
+    if re.match(r"^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.|127\.)", host):
+        stderr(f"Error: Private/internal network URLs are not allowed: {url}")
+        sys.exit(1)
+    if host.endswith((".internal", ".local", ".localhost")):
+        stderr(f"Error: Internal domain URLs are not allowed: {url}")
+        sys.exit(1)
+    return _resolve_and_validate(host)
+
+
 def mask_password(pw: str) -> str:
     if not pw or len(pw) < 8:
         return "****"
@@ -65,14 +109,40 @@ def mask_password(pw: str) -> str:
 # --- API core ---
 
 
+import contextlib
+import socket as _socket
+
+@contextlib.contextmanager
+def _pinned_dns(hostname: str, pinned_ip: str):
+    """Temporarily pin DNS resolution for hostname to the pre-validated IP.
+    Eliminates DNS-rebinding TOCTOU: the TCP connection is forced to use the same
+    IP that passed validation, regardless of what DNS returns at connect time.
+    Safe for single-threaded CLI use (not thread-safe)."""
+    orig = _socket.getaddrinfo
+    def patched(host, port, *args, **kwargs):
+        if isinstance(host, str) and host.lower() == hostname.lower():
+            return orig(pinned_ip, port, *args, **kwargs)
+        return orig(host, port, *args, **kwargs)
+    _socket.getaddrinfo = patched
+    try:
+        yield
+    finally:
+        _socket.getaddrinfo = orig
+
+
 def wp_request(site: dict, method: str, endpoint: str,
                params: dict | None = None, json_data: dict | None = None,
                files: dict | None = None) -> dict | list:
     """Make an authenticated request to the WordPress REST API."""
     url = site["url"].rstrip("/") + "/wp-json/" + endpoint.lstrip("/")
+    # Validate URL and get pinned IP (eliminates DNS-rebinding TOCTOU)
+    pinned_ip = _validate_site_url(url)
     auth = (site["username"], site["app_password"])
 
-    kwargs = {"auth": auth, "timeout": 30}
+    from urllib.parse import urlparse
+    hostname = urlparse(url).hostname
+
+    kwargs = {"auth": auth, "timeout": 30, "allow_redirects": False}
     if params:
         kwargs["params"] = params
     if json_data:
@@ -81,7 +151,8 @@ def wp_request(site: dict, method: str, endpoint: str,
         kwargs["files"] = files
 
     try:
-        resp = requests.request(method, url, **kwargs)
+        with _pinned_dns(hostname, pinned_ip):
+            resp = requests.request(method, url, **kwargs)
     except requests.RequestException as e:
         stderr(f"Request failed: {e}")
         sys.exit(1)
@@ -113,6 +184,9 @@ def cmd_site_add(args):
         stderr(f"Site '{args.alias}' already exists. Remove it first.")
         sys.exit(1)
 
+    _validate_site_url(args.url)
+    if hasattr(args, "password") and args.password:
+        stderr("Warning: --password is visible in process listings. Prefer setting WP_APP_PASSWORD env var.")
     sites[args.alias] = {
         "name": args.name or args.alias,
         "url": args.url.rstrip("/"),
@@ -262,9 +336,19 @@ def cmd_media_list(args):
     print(json.dumps(result, indent=2))
 
 
+def _safe_input_path(filepath: str) -> Path:
+    """Ensure input file path doesn't escape the current working directory."""
+    resolved = Path(filepath).resolve()
+    cwd = Path.cwd().resolve()
+    if not (str(resolved).startswith(str(cwd) + os.sep) or resolved == cwd):
+        stderr(f"Error: File path '{filepath}' is outside the current working directory.")
+        sys.exit(1)
+    return resolved
+
+
 def cmd_media_upload(args):
     site = get_site(args.alias)
-    filepath = Path(args.file)
+    filepath = _safe_input_path(args.file)
     if not filepath.exists():
         stderr(f"File not found: {args.file}")
         sys.exit(1)
@@ -273,15 +357,21 @@ def cmd_media_upload(args):
     mime = mimetypes.guess_type(str(filepath))[0] or "application/octet-stream"
 
     url = site["url"].rstrip("/") + "/wp-json/wp/v2/media"
+    # Re-validate URL before upload and get pinned IP (prevents DNS rebinding TOCTOU)
+    pinned_ip = _validate_site_url(url)
     auth = (site["username"], site["app_password"])
     headers = {
         "Content-Disposition": f'attachment; filename="{filepath.name}"',
         "Content-Type": mime,
     }
 
+    from urllib.parse import urlparse
+    hostname = urlparse(url).hostname
+
     try:
         with open(filepath, "rb") as f:
-            resp = requests.post(url, auth=auth, headers=headers, data=f, timeout=120)
+            with _pinned_dns(hostname, pinned_ip):
+                resp = requests.post(url, auth=auth, headers=headers, data=f, timeout=120, allow_redirects=False)
     except requests.RequestException as e:
         stderr(f"Upload failed: {e}")
         sys.exit(1)

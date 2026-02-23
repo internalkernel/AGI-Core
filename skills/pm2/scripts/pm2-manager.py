@@ -166,13 +166,42 @@ def cmd_resurrect(args):
     sys.exit(result.returncode)
 
 
+_SENSITIVE_PATTERNS = (
+    "KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL", "AUTH",
+    "DATABASE_URL", "REDIS_URL", "MONGO", "DSN", "CONNECTION_STRING",
+    "COOKIE", "SESSION", "PRIVATE", "SIGNING", "ENCRYPTION", "PASSPHRASE",
+    "API_KEY", "ACCESS_KEY", "APP_SECRET",
+)
+
+import re as _re
+
+_CREDENTIAL_VALUE_RE = _re.compile(
+    r"(://[^:]+:[^@]+@)"  # URI with embedded credentials
+    r"|([A-Za-z0-9+/=_-]{40,})"  # High-entropy base64/hex strings (40+ chars)
+)
+
+
+def _redact_env(env: dict) -> dict:
+    """Redact values of environment variables with sensitive-sounding names or credential-like values."""
+    redacted = {}
+    for k, v in env.items():
+        upper_k = k.upper()
+        if any(pat in upper_k for pat in _SENSITIVE_PATTERNS):
+            redacted[k] = "****"
+        elif isinstance(v, str) and _CREDENTIAL_VALUE_RE.search(v):
+            redacted[k] = "****"
+        else:
+            redacted[k] = v
+    return redacted
+
+
 def cmd_env(args):
     p = find_process(args.name_or_id)
     if not p:
         stderr(f"Process '{args.name_or_id}' not found")
         sys.exit(1)
     env = p.get("pm2_env", {}).get("env", {})
-    out_json(env)
+    out_json(_redact_env(env))
 
 
 # ── CLI ───────────────────────────────────────────────────────────────

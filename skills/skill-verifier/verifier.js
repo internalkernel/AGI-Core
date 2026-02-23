@@ -6,7 +6,9 @@
 
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+const { execFile, execFileSync } = require('child_process');
+const { promisify } = require('util');
+const execFileAsync = promisify(execFile);
 const crypto = require('crypto');
 
 // Try to load dstack SDK (will fail gracefully if not in TEE)
@@ -37,15 +39,26 @@ class SkillVerifier {
    */
   async verify(skillPackagePath) {
     const startTime = Date.now();
-    const skillId = path.basename(skillPackagePath, path.extname(skillPackagePath));
+    // Sanitize skillId to prevent path traversal (strip unsafe chars, reject empty)
+    const rawSkillId = path.basename(skillPackagePath, path.extname(skillPackagePath));
+    const skillId = rawSkillId.replace(/[^a-zA-Z0-9._-]/g, '_');
+    if (!skillId || skillId === '.' || skillId === '..') {
+      throw new Error(`Invalid skill package name: ${rawSkillId}`);
+    }
     const extractDir = path.join(this.workDir, skillId);
+    // Verify extractDir stays inside workDir
+    const resolvedExtract = path.resolve(extractDir);
+    const resolvedWork = path.resolve(this.workDir);
+    if (!resolvedExtract.startsWith(resolvedWork + path.sep)) {
+      throw new Error(`Extract directory escapes work directory: ${skillId}`);
+    }
 
     console.log(`\n🔍 Verifying skill: ${skillId}`);
 
     try {
       // Step 1: Extract skill package
       console.log('📦 Extracting skill package...');
-      this.extractSkill(skillPackagePath, extractDir);
+      await this.extractSkill(skillPackagePath, extractDir);
 
       // Step 2: Load and validate manifest
       console.log('📋 Loading manifest...');
@@ -82,7 +95,7 @@ class SkillVerifier {
     } finally {
       // Cleanup
       if (fs.existsSync(extractDir)) {
-        execSync(`rm -rf ${extractDir}`);
+        fs.rmSync(extractDir, { recursive: true, force: true });
       }
     }
   }
@@ -90,14 +103,67 @@ class SkillVerifier {
   /**
    * Extract skill package to directory
    */
-  extractSkill(packagePath, targetDir) {
+  async extractSkill(packagePath, targetDir) {
     if (fs.statSync(packagePath).isDirectory()) {
-      // Copy directory
-      execSync(`cp -r ${packagePath} ${targetDir}`);
+      fs.cpSync(packagePath, targetDir, { recursive: true });
     } else {
-      // Extract tarball
       fs.mkdirSync(targetDir, { recursive: true });
-      execSync(`tar -xzf ${packagePath} -C ${targetDir}`);
+      // Validate tarball entries: reject symlinks/hardlinks, path traversal, and tar bombs
+      const MAX_ENTRIES = 10000;
+      const MAX_TOTAL_SIZE = 500 * 1024 * 1024; // 500MB max expanded size
+      const { stdout: verboseListing } = await execFileAsync('tar', ['-tvzf', packagePath], { encoding: 'utf8', timeout: 30000 });
+      const resolvedTarget = path.resolve(targetDir);
+      const lines = verboseListing.split('\n').filter(Boolean);
+      if (lines.length > MAX_ENTRIES) {
+        throw new Error(`Archive contains ${lines.length} entries (max ${MAX_ENTRIES}). Possible tar bomb.`);
+      }
+      let totalSize = 0;
+      for (const line of lines) {
+        // tar -tv format: "lrwxrwxrwx ..." for symlinks, "hrwxr-xr-x ... link to ..." for hardlinks
+        if (line.startsWith('l') || line.includes(' link to ')) {
+          throw new Error(`Archive contains symlink/hardlink entry (rejected for security): ${line.trim()}`);
+        }
+        // Extract the filename and size from tar -tv output
+        // Format: "perms user/group size date time filename..."
+        // Use match to handle filenames with spaces correctly
+        const match = line.match(/^\S+\s+\S+\s+(\d+)\s+\S+\s+\S+\s+(.*)/);
+        if (!match) continue;
+        const entrySize = parseInt(match[1], 10);
+        const entry = match[2];
+        if (!isNaN(entrySize)) {
+          totalSize += entrySize;
+          if (totalSize > MAX_TOTAL_SIZE) {
+            throw new Error(`Archive expanded size exceeds ${MAX_TOTAL_SIZE} bytes. Possible tar bomb.`);
+          }
+        }
+        // Reject absolute paths and parent-directory references
+        if (entry && (entry.startsWith('/') || entry.split('/').includes('..'))) {
+          throw new Error(`Archive entry contains absolute or traversal path: ${entry}`);
+        }
+        if (entry) {
+          const resolved = path.resolve(targetDir, entry);
+          if (!resolved.startsWith(resolvedTarget + path.sep) && resolved !== resolvedTarget) {
+            throw new Error(`Archive entry escapes target directory: ${entry}`);
+          }
+        }
+      }
+      await execFileAsync('tar', ['-xzf', packagePath, '--no-same-owner', '--no-same-permissions', '-C', targetDir], { timeout: 60000 });
+
+      // Post-extraction: reject symlinks that target outside the extraction directory
+      const walkForSymlinks = (dir) => {
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+          const fullPath = path.join(dir, entry.name);
+          if (entry.isSymbolicLink()) {
+            const linkTarget = path.resolve(path.dirname(fullPath), fs.readlinkSync(fullPath));
+            if (!linkTarget.startsWith(resolvedTarget + path.sep) && linkTarget !== resolvedTarget) {
+              throw new Error(`Symlink escapes target directory: ${entry.name}`);
+            }
+          } else if (entry.isDirectory()) {
+            walkForSymlinks(fullPath);
+          }
+        }
+      };
+      walkForSymlinks(targetDir);
     }
   }
 
@@ -145,29 +211,41 @@ class SkillVerifier {
       const dockerfile = this.generateDockerfile(manifest);
       fs.writeFileSync(path.join(skillDir, 'Dockerfile.test'), dockerfile);
 
-      // Build image
+      // Build image (--network none prevents fetching during build)
       console.log('   Building test container...');
-      execSync(`docker build -f ${skillDir}/Dockerfile.test -t ${containerName} ${skillDir}`, {
+      await execFileAsync('docker', ['build', '--network', 'none', '-f', path.join(skillDir, 'Dockerfile.test'), '-t', containerName, skillDir], {
         env: { ...process.env, DOCKER_HOST },
-        stdio: 'pipe'
+        timeout: 60000, // 60s build timeout
       });
 
       // Run tests
       console.log('   Running tests...');
       const startTime = Date.now();
-      
+
       let stdout = '';
       let stderr = '';
       let exitCode = 0;
 
       try {
-        stdout = execSync(`docker run --rm ${containerName}`, {
+        const result = await execFileAsync('docker', [
+          'run', '--rm',
+          '--network', 'none',           // No outbound network access
+          '--read-only',                  // Read-only root filesystem
+          '--cap-drop', 'ALL',           // Drop all capabilities
+          '--security-opt', 'no-new-privileges',
+          '--pids-limit', '256',         // Limit process count
+          '--memory', '512m',            // Memory limit
+          '--cpus', '1',                 // CPU limit
+          '--tmpfs', '/tmp:size=64m',    // Writable tmpfs for temp files
+          containerName
+        ], {
           env: { ...process.env, DOCKER_HOST },
           encoding: 'utf8',
           timeout: 30000 // 30s timeout
         });
+        stdout = result.stdout;
       } catch (error) {
-        exitCode = error.status || 1;
+        exitCode = typeof error.code === 'number' ? error.code : 1;
         stdout = error.stdout || '';
         stderr = error.stderr || error.message;
       }
@@ -185,9 +263,8 @@ class SkillVerifier {
     } finally {
       // Cleanup image
       try {
-        execSync(`docker rmi ${containerName}`, {
+        await execFileAsync('docker', ['rmi', containerName], {
           env: { ...process.env, DOCKER_HOST },
-          stdio: 'ignore'
         });
       } catch (e) {
         // Ignore cleanup errors
@@ -196,12 +273,58 @@ class SkillVerifier {
   }
 
   /**
+   * Allowlisted base images for skill testing
+   */
+  static ALLOWED_IMAGES = new Set([
+    'alpine:latest', 'alpine:3.19', 'alpine:3.20',
+    'node:20-alpine', 'node:22-alpine', 'node:20-slim', 'node:22-slim',
+    'python:3.11-alpine', 'python:3.12-alpine', 'python:3.11-slim', 'python:3.12-slim',
+    'rust:1-alpine', 'rust:1-slim',
+    'golang:1.22-alpine', 'golang:1.23-alpine',
+    'ubuntu:22.04', 'ubuntu:24.04',
+    'debian:bookworm-slim', 'debian:bullseye-slim',
+  ]);
+
+  /**
+   * Validate a shell command string for Dockerfile use.
+   * Only allows simple commands (alphanumeric, spaces, hyphens, dots, slashes, equals, commas, colons).
+   * Rejects all shell metacharacters and dangerous programs.
+   */
+  validateShellCommand(cmd) {
+    if (!cmd || typeof cmd !== 'string') return '';
+    // Only allow safe characters: no shell operators, no subshells, no redirects
+    if (/[^a-zA-Z0-9\s\-_.\/=,:"'\[\]]/.test(cmd)) {
+      throw new Error(`Manifest command contains disallowed characters: ${cmd.slice(0, 80)}`);
+    }
+    // Reject shell control operators even as words
+    if (/(\|\||&&|[;&|`$(){}<>!#~])/.test(cmd)) {
+      throw new Error(`Manifest command contains shell operator: ${cmd.slice(0, 80)}`);
+    }
+    // Reject dangerous commands
+    const dangerous = /\b(curl|wget|nc|ncat|socat|ssh|scp|rsync|apt-key|gpg\s+--recv|chmod\s+[0-7]*s|chown|mount|umount|dd\s+if=|mkfs|fdisk|kill|pkill|reboot|shutdown|su\b|sudo)\b/i;
+    if (dangerous.test(cmd)) {
+      throw new Error(`Manifest command contains disallowed program: ${cmd.match(dangerous)[0]}`);
+    }
+    return cmd;
+  }
+
+  /**
    * Generate Dockerfile for testing
    */
   generateDockerfile(manifest) {
-    // Default to alpine with bash
+    // Validate base image against allowlist
     const baseImage = manifest.runtime || 'alpine:latest';
-    
+    if (!SkillVerifier.ALLOWED_IMAGES.has(baseImage)) {
+      throw new Error(
+        `Disallowed runtime image "${baseImage}". ` +
+        `Allowed: ${[...SkillVerifier.ALLOWED_IMAGES].join(', ')}`
+      );
+    }
+
+    // Validate shell commands
+    const testDeps = this.validateShellCommand(manifest.test_deps);
+    const testCommand = this.validateShellCommand(manifest.test_command);
+
     return `FROM ${baseImage}
 
 WORKDIR /skill
@@ -210,10 +333,10 @@ WORKDIR /skill
 COPY . .
 
 # Install test dependencies if specified
-${manifest.test_deps ? `RUN ${manifest.test_deps}` : ''}
+${testDeps ? `RUN ["sh", "-c", ${JSON.stringify(testDeps)}]` : ''}
 
 # Run tests
-${manifest.test_command ? `CMD ${manifest.test_command}` : 'CMD ["sh", "-c", "echo \\"No test command specified\\""]'}
+${testCommand ? `CMD ["sh", "-c", ${JSON.stringify(testCommand)}]` : 'CMD ["sh", "-c", "echo \\"No test command specified\\""]'}
 `;
   }
 
@@ -298,9 +421,15 @@ if (require.main === module) {
       console.log('\n📊 Results:');
       console.log(JSON.stringify(result, null, 2));
       
-      // Save result
-      const outputPath = path.join(__dirname, 'work', `${result.skillId}.json`);
-      fs.writeFileSync(outputPath, JSON.stringify(result, null, 2));
+      // Save result (sanitize skillId to prevent path traversal)
+      const safeSkillId = result.skillId.replace(/[^a-zA-Z0-9._-]/g, '_');
+      const outputPath = path.join(__dirname, 'work', `${safeSkillId}.json`);
+      const resolvedOutput = path.resolve(outputPath);
+      const resolvedWork = path.resolve(path.join(__dirname, 'work'));
+      if (!resolvedOutput.startsWith(resolvedWork + path.sep)) {
+        throw new Error('Output path escapes work directory');
+      }
+      fs.writeFileSync(resolvedOutput, JSON.stringify(result, null, 2));
       console.log(`\n💾 Saved to: ${outputPath}`);
       
       process.exit(result.result.passed ? 0 : 1);

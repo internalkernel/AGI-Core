@@ -142,7 +142,12 @@ def main():
 
     # Write or print output
     if args.output:
-        out_path = Path(args.output)
+        import os as _os
+        out_path = Path(args.output).resolve()
+        cwd = Path.cwd().resolve()
+        if not (str(out_path).startswith(str(cwd) + _os.sep) or out_path == cwd):
+            print(f"Error: Output path '{args.output}' is outside the current working directory.", file=sys.stderr)
+            sys.exit(1)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(output, encoding="utf-8")
         print(f"Output saved: {out_path.resolve()}", file=sys.stderr)

@@ -16,30 +16,19 @@ const SCOPES = [
 ];
 
 /**
- * Gets an available port by temporarily binding to port 0
+ * Starts a local HTTP server on an ephemeral port to receive the OAuth callback.
+ * The server is kept alive (no close/reopen gap) to prevent local port race attacks.
+ * Returns the server, its port, and a promise that resolves with the auth code.
  */
-async function getAvailablePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const server = createServer();
-    server.listen(0, () => {
-      const address = server.address();
-      if (!address || typeof address === 'string') {
-        server.close();
-        reject(new Error('Failed to get port'));
-        return;
-      }
-      const port = address.port;
-      server.close(() => resolve(port));
+function startCallbackServer(expectedState: string): Promise<{ server: ReturnType<typeof createServer>; port: number; codePromise: Promise<string> }> {
+  return new Promise((outerResolve, outerReject) => {
+    let resolveCode: (code: string) => void;
+    let rejectCode: (err: Error) => void;
+    const codePromise = new Promise<string>((res, rej) => {
+      resolveCode = res;
+      rejectCode = rej;
     });
-    server.on('error', reject);
-  });
-}
 
-/**
- * Starts a local HTTP server to receive the OAuth callback
- */
-function createCallbackServer(port: number): Promise<string> {
-  return new Promise((resolve, reject) => {
     const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
       try {
         if (!req.url) {
@@ -50,21 +39,23 @@ function createCallbackServer(port: number): Promise<string> {
 
         const url = new URL(req.url, 'http://localhost');
         const code = url.searchParams.get('code');
+        const returnedState = url.searchParams.get('state');
         const error = url.searchParams.get('error');
 
         if (error) {
-          res.writeHead(200, { 'Content-Type': 'text/html' });
-          res.end(`
-            <html>
-              <body>
-                <h1>Authentication Failed</h1>
-                <p>Error: ${error}</p>
-                <p>You can close this window.</p>
-              </body>
-            </html>
-          `);
+          res.writeHead(200, { 'Content-Type': 'text/plain' });
+          res.end('Authentication failed. You can close this window.');
           server.close();
-          reject(new Error(`OAuth error: ${error}`));
+          rejectCode(new Error('OAuth authentication failed'));
+          return;
+        }
+
+        // Validate CSRF state parameter
+        if (returnedState !== expectedState) {
+          res.writeHead(400, { 'Content-Type': 'text/plain' });
+          res.end('Invalid state parameter. Possible CSRF attack.');
+          server.close();
+          rejectCode(new Error('OAuth state mismatch — possible CSRF'));
           return;
         }
 
@@ -79,7 +70,7 @@ function createCallbackServer(port: number): Promise<string> {
             </html>
           `);
           server.close();
-          resolve(code);
+          resolveCode(code);
           return;
         }
 
@@ -89,12 +80,30 @@ function createCallbackServer(port: number): Promise<string> {
         res.writeHead(500);
         res.end('Internal Server Error');
         server.close();
-        reject(err);
+        rejectCode(err as Error);
       }
     });
 
-    server.on('error', reject);
-    server.listen(port);
+    server.on('error', outerReject);
+    // Bind to loopback only on ephemeral port — no close/reopen gap
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      if (!address || typeof address === 'string') {
+        server.close();
+        outerReject(new Error('Failed to get port'));
+        return;
+      }
+      const port = address.port;
+
+      // Auto-timeout after 5 minutes to prevent hanging servers
+      const timeout = setTimeout(() => {
+        server.close();
+        rejectCode(new Error('OAuth callback timed out after 5 minutes'));
+      }, 300000);
+      server.on('close', () => clearTimeout(timeout));
+
+      outerResolve({ server, port, codePromise });
+    });
   });
 }
 
@@ -111,9 +120,13 @@ export async function initiateOAuthFlow(
   clientId: string,
   clientSecret: string
 ): Promise<OAuth2Client> {
-  // Get an available port for the callback
-  const port = await getAvailablePort();
-  const redirectUri = `http://localhost:${port}`;
+  // Generate CSRF-safe state parameter
+  const { randomBytes } = await import('crypto');
+  const state = randomBytes(32).toString('hex');
+
+  // Start callback server first (keeps port bound — no race window)
+  const { port, codePromise } = await startCallbackServer(state);
+  const redirectUri = `http://127.0.0.1:${port}`;
 
   // Create OAuth2 client
   const oauth2Client = new google.auth.OAuth2(
@@ -127,6 +140,7 @@ export async function initiateOAuthFlow(
     access_type: 'offline',
     scope: SCOPES,
     prompt: 'consent', // Force consent to ensure we get a refresh token
+    state,
   });
 
   console.log('Opening browser for authentication...');
@@ -137,9 +151,9 @@ export async function initiateOAuthFlow(
   // Open browser
   await open(authUrl);
 
-  // Start callback server and wait for code
+  // Wait for callback
   console.log('Waiting for authentication...');
-  const code = await createCallbackServer(port);
+  const code = await codePromise;
 
   // Exchange code for tokens
   const { tokens } = await oauth2Client.getToken(code);

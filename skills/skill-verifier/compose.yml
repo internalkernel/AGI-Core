@@ -4,12 +4,28 @@ services:
     image: node:20-alpine
     working_dir: /app
     volumes:
-      - ./:/app
+      - ./:/app:ro
+      # ⚠ SECURITY: Docker socket grants host-level access.
+      # Required for container-based skill testing.
+      # Mitigations: (1) VERIFIER_API_KEY auth on all endpoints,
+      # (2) deploy in isolated network, (3) consider rootless Docker,
+      # (4) use a dedicated build VM or remote builder in production.
       - /var/run/docker.sock:/var/run/docker.sock
     ports:
       - "3000:3000"
     environment:
       - NODE_ENV=production
       - PORT=3000
+      # IMPORTANT: Set VERIFIER_API_KEY to a strong random secret
+      - VERIFIER_API_KEY=${VERIFIER_API_KEY}
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /app/uploads:size=100M
+      - /app/results:size=100M
+      - /app/work:size=200M
+      - /tmp:size=50M
     command: sh -c "npm install && npm start"
     restart: unless-stopped

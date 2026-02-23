@@ -350,6 +350,11 @@ export class GmailClient {
   /**
    * Create RFC 2822 compliant MIME message
    */
+  /** Strip CR/LF from header values to prevent email header injection */
+  private sanitizeHeader(value: string): string {
+    return value.replace(/[\r\n]/g, '');
+  }
+
   private createMimeMessage(
     to: string,
     subject: string,
@@ -357,15 +362,16 @@ export class GmailClient {
     inReplyTo?: string
   ): string {
     const lines = [
-      `To: ${to}`,
-      `Subject: ${subject}`,
+      `To: ${this.sanitizeHeader(to)}`,
+      `Subject: ${this.sanitizeHeader(subject)}`,
       'Content-Type: text/plain; charset=utf-8',
       'MIME-Version: 1.0',
     ];
 
     if (inReplyTo) {
-      lines.push(`In-Reply-To: ${inReplyTo}`);
-      lines.push(`References: ${inReplyTo}`);
+      const sanitizedReplyTo = this.sanitizeHeader(inReplyTo);
+      lines.push(`In-Reply-To: ${sanitizedReplyTo}`);
+      lines.push(`References: ${sanitizedReplyTo}`);
     }
 
     lines.push('', body);

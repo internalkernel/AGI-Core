@@ -53,6 +53,16 @@ def stderr(*args, **kwargs):
     print(*args, file=sys.stderr, **kwargs)
 
 
+def _safe_output_path(filepath: str) -> Path:
+    """Ensure output path doesn't escape the current working directory."""
+    resolved = Path(filepath).resolve()
+    cwd = Path.cwd().resolve()
+    if not (str(resolved).startswith(str(cwd) + os.sep) or resolved == cwd):
+        stderr(f"Error: Output path '{filepath}' is outside the current working directory.")
+        sys.exit(1)
+    return resolved
+
+
 # --- WP-CLI core ---
 
 
@@ -70,7 +80,17 @@ def run_wp(site: dict, wp_args: list[str], json_format: bool = True) -> str | di
     if json_format and not any(a.startswith("--format=") or a == "--format" for a in wp_args):
         cmd.append("--format=json")
 
-    stderr(f"$ {' '.join(cmd)}")
+    # Redact sensitive flags from command echo
+    _SENSITIVE_FLAGS = {"--password", "--auth", "--key", "--token", "--secret"}
+    display_cmd = []
+    for a in cmd:
+        if "=" in a:
+            flag_part = a.split("=", 1)[0]
+            if flag_part.lower() in _SENSITIVE_FLAGS:
+                display_cmd.append(f"{flag_part}=****")
+                continue
+        display_cmd.append(a)
+    stderr(f"$ {' '.join(display_cmd)}")
 
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
@@ -321,8 +341,9 @@ def cmd_seopress(args):
     if args.seopress_action == "export":
         out = run_wp(site, ["seopress", "export"], json_format=False)
         if args.file:
-            Path(args.file).write_text(out if isinstance(out, str) else json.dumps(out))
-            print(json.dumps({"ok": True, "exported_to": args.file}, indent=2))
+            safe_path = _safe_output_path(args.file)
+            safe_path.write_text(out if isinstance(out, str) else json.dumps(out))
+            print(json.dumps({"ok": True, "exported_to": str(safe_path)}, indent=2))
         else:
             print(out)
     elif args.seopress_action == "import":

@@ -13,26 +13,69 @@ const SkillVerifier = require('./verifier.js');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const VERIFIER_API_KEY = process.env.VERIFIER_API_KEY || '';
+
+// Auth middleware — all non-health endpoints require Bearer token
+function checkAuth(req, res, next) {
+  if (!VERIFIER_API_KEY) {
+    return res.status(503).json({ error: 'VERIFIER_API_KEY not configured' });
+  }
+  const auth = req.headers.authorization;
+  if (!auth || !auth.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  const provided = Buffer.from(auth.slice(7));
+  const expected = Buffer.from(VERIFIER_API_KEY);
+  if (provided.length !== expected.length || !crypto.timingSafeEqual(provided, expected)) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  next();
+}
 
 // Storage setup
 const uploadDir = path.join(__dirname, 'uploads');
 const resultsDir = path.join(__dirname, 'results');
 [uploadDir, resultsDir].forEach(dir => {
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
 });
 
-const upload = multer({ dest: uploadDir });
+const upload = multer({ dest: uploadDir, limits: { fileSize: 50 * 1024 * 1024 } }); // 50MB max
 
-// Job queue (in-memory for now)
+// Job queue (in-memory for now) with concurrency + TTL limits
 const jobs = new Map();
+const MAX_CONCURRENT_JOBS = 5;
+const MAX_TOTAL_JOBS = 100;
+const JOB_TTL_MS = 3600000; // 1 hour
+
+// Auto-cleanup expired jobs every 5 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, job] of jobs) {
+    if (now - new Date(job.createdAt).getTime() > JOB_TTL_MS) {
+      // Cleanup uploaded file if exists
+      if (job.skillPath && fs.existsSync(job.skillPath)) {
+        try { fs.unlinkSync(job.skillPath); } catch {}
+      }
+      // Cleanup result file on disk
+      const resultPath = path.join(resultsDir, `${id}.json`);
+      if (fs.existsSync(resultPath)) {
+        try { fs.unlinkSync(resultPath); } catch {}
+      }
+      jobs.delete(id);
+    }
+  }
+}, 300000);
 
 // Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Enable CORS
+// Enable CORS (restrict origins to configured trusted domain or same-origin)
+const CORS_ORIGIN = process.env.CORS_ORIGIN || '';
 app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
+  if (CORS_ORIGIN) {
+    res.header('Access-Control-Allow-Origin', CORS_ORIGIN);
+  }
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.header('Access-Control-Allow-Methods', 'GET, POST, DELETE');
   next();
@@ -61,22 +104,24 @@ app.get('/health', (req, res) => {
  * Body: multipart/form-data with 'skill' file (tarball or directory as zip)
  * OR JSON with { skillPath: "/path/to/skill" }
  */
-app.post('/verify', upload.single('skill'), async (req, res) => {
+app.post('/verify', checkAuth, upload.single('skill'), async (req, res) => {
   try {
-    let skillPath;
-    
-    if (req.file) {
-      // Uploaded file
-      skillPath = req.file.path;
-    } else if (req.body.skillPath) {
-      // Direct path (for local testing)
-      skillPath = req.body.skillPath;
-      if (!fs.existsSync(skillPath)) {
-        return res.status(400).json({ error: 'Skill path not found' });
-      }
-    } else {
-      return res.status(400).json({ error: 'No skill provided' });
+    if (!req.file) {
+      return res.status(400).json({ error: 'No skill file provided. Upload a tarball as multipart "skill" field.' });
     }
+
+    // Enforce job limits
+    const activeJobs = Array.from(jobs.values()).filter(j => j.status === 'pending' || j.status === 'running').length;
+    if (activeJobs >= MAX_CONCURRENT_JOBS) {
+      fs.unlinkSync(req.file.path);
+      return res.status(429).json({ error: 'Too many active jobs. Try again later.' });
+    }
+    if (jobs.size >= MAX_TOTAL_JOBS) {
+      fs.unlinkSync(req.file.path);
+      return res.status(429).json({ error: 'Job queue full. Try again later.' });
+    }
+
+    const skillPath = req.file.path;
 
     // Create job
     const jobId = crypto.randomBytes(16).toString('hex');
@@ -105,7 +150,7 @@ app.post('/verify', upload.single('skill'), async (req, res) => {
 
   } catch (error) {
     console.error('Error creating verification job:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -113,7 +158,7 @@ app.post('/verify', upload.single('skill'), async (req, res) => {
  * Get verification status
  * GET /verify/:jobId
  */
-app.get('/verify/:jobId', (req, res) => {
+app.get('/verify/:jobId', checkAuth, (req, res) => {
   const job = jobs.get(req.params.jobId);
   
   if (!job) {
@@ -141,7 +186,7 @@ app.get('/verify/:jobId', (req, res) => {
  * List all jobs
  * GET /jobs
  */
-app.get('/jobs', (req, res) => {
+app.get('/jobs', checkAuth, (req, res) => {
   const status = req.query.status;
   const limit = parseInt(req.query.limit) || 50;
   
@@ -172,15 +217,20 @@ app.get('/jobs', (req, res) => {
  * Delete a job
  * DELETE /verify/:jobId
  */
-app.delete('/verify/:jobId', (req, res) => {
+app.delete('/verify/:jobId', checkAuth, (req, res) => {
   const job = jobs.get(req.params.jobId);
-  
+
   if (!job) {
     return res.status(404).json({ error: 'Job not found' });
   }
 
+  // Reject deletion of active jobs to prevent concurrency limit bypass
+  if (job.status === 'pending' || job.status === 'running') {
+    return res.status(409).json({ error: 'Cannot delete active job. Wait for completion or failure.' });
+  }
+
   // Clean up uploaded file if exists
-  if (job.skillPath.startsWith(uploadDir)) {
+  if (job.skillPath && job.skillPath.startsWith(uploadDir)) {
     try {
       fs.unlinkSync(job.skillPath);
     } catch (e) {
@@ -188,8 +238,14 @@ app.delete('/verify/:jobId', (req, res) => {
     }
   }
 
+  // Clean up result file on disk
+  const resultPath = path.join(resultsDir, `${req.params.jobId}.json`);
+  if (fs.existsSync(resultPath)) {
+    try { fs.unlinkSync(resultPath); } catch {}
+  }
+
   jobs.delete(req.params.jobId);
-  
+
   res.json({ message: 'Job deleted' });
 });
 
@@ -197,7 +253,7 @@ app.delete('/verify/:jobId', (req, res) => {
  * Get verification result attestation
  * GET /verify/:jobId/attestation
  */
-app.get('/verify/:jobId/attestation', (req, res) => {
+app.get('/verify/:jobId/attestation', checkAuth, (req, res) => {
   const job = jobs.get(req.params.jobId);
   
   if (!job) {
@@ -222,30 +278,35 @@ app.get('/verify/:jobId/attestation', (req, res) => {
  */
 async function runVerification(jobId, skillPath) {
   const job = jobs.get(jobId);
-  
+
   try {
     job.status = 'running';
     job.startedAt = new Date().toISOString();
-    
+
     const verifier = new SkillVerifier();
     const result = await verifier.verify(skillPath);
-    
+
     job.status = 'completed';
     job.completedAt = new Date().toISOString();
     job.result = result;
-    
+
     // Save result to file
     const resultPath = path.join(resultsDir, `${jobId}.json`);
-    fs.writeFileSync(resultPath, JSON.stringify(result, null, 2));
-    
+    fs.writeFileSync(resultPath, JSON.stringify(result, null, 2), { mode: 0o600 });
+
     console.log(`✅ Job ${jobId} completed: ${result.skillId} (${result.result.passed ? 'PASSED' : 'FAILED'})`);
-    
+
   } catch (error) {
     job.status = 'failed';
     job.completedAt = new Date().toISOString();
     job.error = error.message;
-    
+
     console.error(`❌ Job ${jobId} failed:`, error.message);
+  } finally {
+    // Always clean up uploaded file to prevent disk exhaustion
+    if (skillPath && skillPath.startsWith(uploadDir) && fs.existsSync(skillPath)) {
+      try { fs.unlinkSync(skillPath); } catch {}
+    }
   }
 }
 

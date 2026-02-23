@@ -58,6 +58,9 @@ def main():
     args = parser.parse_args()
 
     # Get API key
+    if args.api_key:
+        print("Warning: Passing API keys via --api-key exposes them in the process list. "
+              "Prefer setting the GEMINI_API_KEY environment variable instead.", file=sys.stderr)
     api_key = get_api_key(args.api_key)
     if not api_key:
         print("Error: No API key provided.", file=sys.stderr)
@@ -74,14 +77,22 @@ def main():
     # Initialise client
     client = genai.Client(api_key=api_key)
 
-    # Set up output path
-    output_path = Path(args.filename)
+    # Set up output path — validate it stays within CWD
+    output_path = Path(args.filename).resolve()
+    cwd = Path.cwd().resolve()
+    if not (str(output_path).startswith(str(cwd) + os.sep) or output_path == cwd):
+        print(f"Error: Output path '{args.filename}' is outside the current working directory.", file=sys.stderr)
+        sys.exit(1)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Load input image if provided
+    # Load input image if provided — validate path stays within CWD
     input_image = None
     output_resolution = args.resolution
     if args.input_image:
+        input_path = Path(args.input_image).resolve()
+        if not (str(input_path).startswith(str(cwd) + os.sep) or input_path == cwd):
+            print(f"Error: Input path '{args.input_image}' is outside the current working directory.", file=sys.stderr)
+            sys.exit(1)
         try:
             input_image = PILImage.open(args.input_image)
             print(f"Loaded input image: {args.input_image}")

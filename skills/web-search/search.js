@@ -114,9 +114,22 @@ function detectCommands(text) {
 	return detections;
 }
 
+/** Strip ANSI escape sequences and OSC terminal control codes from untrusted text */
+function stripTerminalEscapes(text) {
+	if (!text) return text;
+	// ANSI CSI sequences (e.g. \x1b[31m), OSC sequences (\x1b]...\x07), and other escape codes
+	return text.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "")
+		.replace(/\x1b\][^\x07]*\x07/g, "")
+		.replace(/\x1b[()][AB012]/g, "")
+		.replace(/[\x00-\x08\x0e-\x1f]/g, "");
+}
+
 function sanitizeContent(text) {
 	if (!text) return text;
 	let cleaned = text;
+
+	// Strip terminal escape sequences first
+	cleaned = stripTerminalEscapes(cleaned);
 
 	// Escape common delimiter injection attempts
 	cleaned = cleaned.replace(/<\|?(system|im_start|im_end|endoftext)\|?>/gi, "[REMOVED_DELIMITER]");
@@ -154,6 +167,85 @@ function buildSecurityReport(allDetections) {
 	}
 
 	return report;
+}
+
+// ─── Security: SSRF Protection ───────────────────────────────────────────────
+
+import { lookup } from "dns/promises";
+import { isIP } from "net";
+
+function isAllowedUrl(urlString) {
+	let parsed;
+	try {
+		parsed = new URL(urlString);
+	} catch {
+		return false;
+	}
+	if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
+	const host = parsed.hostname.toLowerCase();
+	// Strip brackets from IPv6 hosts for uniform checking
+	const bareHost = host.replace(/^\[|\]$/g, "");
+	if (bareHost === "localhost" || bareHost === "0.0.0.0" || bareHost === "::1" || bareHost === "::") return false;
+	if (/^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.|0\.)/.test(bareHost)) return false;
+	if (bareHost.endsWith(".internal") || bareHost.endsWith(".local") || bareHost.endsWith(".localhost")) return false;
+	// Block IPv6-mapped IPv4 addresses (e.g. ::ffff:127.0.0.1, ::ffff:7f00:1)
+	if (/^::ffff:/i.test(bareHost)) return false;
+	return true;
+}
+
+function isPrivateIP(ip) {
+	// Normalize IPv6-mapped IPv4 (e.g. ::ffff:127.0.0.1 → 127.0.0.1)
+	const mapped = ip.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/i);
+	const normalized = mapped ? mapped[1] : ip;
+	// IPv4 non-global ranges
+	if (/^(127\.|10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|169\.254\.|0\.)/.test(normalized)) return true;
+	if (/^(100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/.test(normalized)) return true; // CGNAT 100.64.0.0/10
+	if (/^(192\.0\.0\.|192\.0\.2\.|198\.1[89]\.|198\.51\.100\.|203\.0\.113\.)/.test(normalized)) return true; // Documentation/benchmarking
+	if (/^(22[4-9]\.|23\d\.|24\d\.|25[0-5]\.)/.test(normalized)) return true; // Multicast + reserved (224-255)
+	if (normalized === "0.0.0.0" || normalized === "255.255.255.255") return true;
+	if (normalized === "::1" || normalized === "::" || normalized === "0:0:0:0:0:0:0:1") return true;
+	// IPv6 non-global ranges
+	if (/^(fc|fd|fe[89ab])/i.test(ip)) return true; // ULA + link-local
+	if (/^ff/i.test(ip)) return true; // Multicast
+	// Catch any remaining ::ffff: mapped addresses (e.g. ::ffff:7f00:1)
+	if (/^::ffff:/i.test(ip)) return true;
+	return false;
+}
+
+// Note: DNS-rebinding TOCTOU is mitigated by: per-hop redirect validation in safeFetch,
+// manual redirect following (no auto-redirect), and short connection timeouts.
+// The residual rebinding window (ms) requires attacker-controlled DNS with near-zero TTL.
+async function validateDnsResolution(hostname) {
+	if (isIP(hostname)) {
+		if (isPrivateIP(hostname)) throw new Error(`Direct IP is private/reserved (${hostname})`);
+		return;
+	}
+	const results = await lookup(hostname, { all: true });
+	for (const { address } of results) {
+		if (isPrivateIP(address)) {
+			throw new Error(`DNS resolves to private/reserved IP (${address})`);
+		}
+	}
+}
+
+// Note: Node.js fetch does not support connect-time IP pinning. DNS-rebinding
+// TOCTOU is mitigated by per-hop DNS validation, manual redirect following, and
+// short connection timeouts.
+async function safeFetch(url, options = {}, maxRedirects = 5) {
+	let currentUrl = url;
+	for (let i = 0; i < maxRedirects; i++) {
+		if (!isAllowedUrl(currentUrl)) throw new Error(`Redirect to blocked URL: ${currentUrl}`);
+		await validateDnsResolution(new URL(currentUrl).hostname);
+		const response = await fetch(currentUrl, { ...options, redirect: "manual", signal: AbortSignal.timeout(15000) });
+		if (response.status >= 300 && response.status < 400) {
+			const location = response.headers.get("location");
+			if (!location) throw new Error("Redirect with no Location header");
+			currentUrl = new URL(location, currentUrl).href;
+			continue;
+		}
+		return response;
+	}
+	throw new Error("Too many redirects");
 }
 
 // ─── Engine Selection ────────────────────────────────────────────────────────
@@ -199,6 +291,7 @@ async function fetchTavilyResults(query, numResults, includeContent) {
 			"Authorization": `Bearer ${tavilyKey}`,
 		},
 		body: JSON.stringify(body),
+		signal: AbortSignal.timeout(30000),
 	});
 
 	if (!response.ok) {
@@ -234,6 +327,7 @@ async function fetchBraveResults(query, numResults) {
 				"Accept-Encoding": "gzip",
 				"X-Subscription-Token": braveKey,
 			},
+			signal: AbortSignal.timeout(30000),
 		}
 	);
 
@@ -275,8 +369,14 @@ function htmlToMarkdown(html) {
 }
 
 async function fetchPageContent(url) {
+	if (!isAllowedUrl(url)) return "(URL blocked: internal network target)";
 	try {
-		const response = await fetch(url, {
+		await validateDnsResolution(new URL(url).hostname);
+	} catch (e) {
+		return `(URL blocked: ${e.message})`;
+	}
+	try {
+		const response = await safeFetch(url, {
 			headers: {
 				"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
 				"Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -288,10 +388,27 @@ async function fetchPageContent(url) {
 			return `(HTTP ${response.status})`;
 		}
 
-		const html = await response.text();
+		// Cap response body to 2MB to prevent memory exhaustion
+		const MAX_BODY = 2 * 1024 * 1024;
+		const reader = response.body?.getReader();
+		if (!reader) return "(No response body)";
+		const chunks = [];
+		let totalBytes = 0;
+		while (true) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			totalBytes += value.length;
+			if (totalBytes > MAX_BODY) {
+				reader.cancel();
+				break;
+			}
+			chunks.push(value);
+		}
+		const html = Buffer.concat(chunks).toString("utf-8");
+
 		const dom = new JSDOM(html, { url });
-		const reader = new Readability(dom.window.document);
-		const article = reader.parse();
+		const readabilityReader = new Readability(dom.window.document);
+		const article = readabilityReader.parse();
 
 		if (article && article.content) {
 			return htmlToMarkdown(article.content).substring(0, 5000);

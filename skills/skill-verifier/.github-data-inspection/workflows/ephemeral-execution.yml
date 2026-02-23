@@ -10,7 +10,10 @@ on:
       dataset_secret:
         description: 'Name of GitHub secret containing dataset'
         required: true
-        type: string
+        type: choice
+        options:
+          - PRIVATE_DATASET
+          - SAMPLE_DATASET
         default: 'PRIVATE_DATASET'
       model:
         description: 'LLM model to use'
@@ -42,24 +45,27 @@ jobs:
       
       - name: Generate execution metadata
         id: metadata
+        env:
+          MODEL: ${{ github.event.inputs.model }}
+          TOOLS: ${{ github.event.inputs.tools }}
         run: |
           echo "execution_id=$(uuidgen)" >> $GITHUB_OUTPUT
           echo "timestamp=$(date -Iseconds)" >> $GITHUB_OUTPUT
           echo "🎬 Starting ephemeral execution..."
           echo "   Execution ID: $(uuidgen)"
           echo "   Timestamp: $(date -Iseconds)"
-          echo "   Model: ${{ github.event.inputs.model }}"
-          echo "   Tools: ${{ github.event.inputs.tools }}"
+          echo "   Model: $MODEL"
+          echo "   Tools: $TOOLS"
       
       - name: Load and hash dataset
         id: dataset
+        env:
+          DATASET: ${{ secrets[github.event.inputs.dataset_secret] }}
+          DATASET_SECRET_NAME: ${{ github.event.inputs.dataset_secret }}
         run: |
-          # Load dataset from secret (NOT logged)
-          DATASET="${{ secrets[github.event.inputs.dataset_secret] }}"
-          
           # Validate dataset exists
           if [ -z "$DATASET" ]; then
-            echo "❌ Error: Dataset secret '${{ github.event.inputs.dataset_secret }}' is empty or not found"
+            echo "❌ Error: Dataset secret '$DATASET_SECRET_NAME' is empty or not found"
             exit 1
           fi
           
@@ -111,7 +117,8 @@ jobs:
 {dataset}
 </dataset>
 
-Analyze the dataset above according to the prompt. Be specific and provide evidence from the data."""
+Analyze the dataset above according to the prompt. Be specific and provide evidence from the data.
+IMPORTANT: Do NOT reproduce raw dataset records in your response. Provide only aggregate statistics, counts, and thematic summaries."""
           
           response = client.messages.create(
               model=model,
@@ -136,7 +143,20 @@ Analyze the dataset above according to the prompt. Be specific and provide evide
           print("=" * 60)
           print("📊 RESULT:")
           print("=" * 60)
-          print(result)
+          # Redaction gate: reject output that looks like it contains raw dataset records
+          import re as _re
+          # Check for common data leak patterns: emails, credit cards, SSNs, phone numbers
+          leak_patterns = [
+              _re.compile(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'),  # email
+              _re.compile(r'\b\d{3}[-.]?\d{2}[-.]?\d{4}\b'),  # SSN-like
+              _re.compile(r'\b\d{4}[- ]?\d{4}[- ]?\d{4}[- ]?\d{4}\b'),  # credit card-like
+          ]
+          leak_count = sum(len(pat.findall(result)) for pat in leak_patterns)
+          if leak_count > 5:
+              print("[REDACTED — output contained potential raw dataset records]")
+              print(f"   ({leak_count} PII-like patterns detected. Review artifacts directly.)")
+          else:
+              print(result)
           print("=" * 60)
           print()
           
@@ -165,72 +185,84 @@ Analyze the dataset above according to the prompt. Be specific and provide evide
       
       - name: Generate execution certificate
         id: certificate
+        env:
+          INPUT_DATASET_SECRET: ${{ github.event.inputs.dataset_secret }}
+          INPUT_MODEL: ${{ github.event.inputs.model }}
+          INPUT_TOOLS: ${{ github.event.inputs.tools }}
+          INPUT_PROMPT: ${{ github.event.inputs.llm_prompt }}
+          META_TIMESTAMP: ${{ steps.metadata.outputs.timestamp }}
+          DS_HASH: ${{ steps.dataset.outputs.dataset_hash }}
+          DS_SIZE: ${{ steps.dataset.outputs.dataset_size }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_NUMBER: ${{ github.run_number }}
+          REPO: ${{ github.repository }}
         run: |
           # Read execution trace
           TRACE=$(cat execution_trace.json)
           DURATION=$(echo "$TRACE" | jq -r '.execution_time_seconds')
           TOKENS=$(echo "$TRACE" | jq -r '.tokens.total')
-          
-          # Generate certificate in step summary
-          cat << 'EOF' >> $GITHUB_STEP_SUMMARY
+          RESULT=$(cat result.txt)
+
+          # Generate certificate in step summary using env vars (not expression interpolation)
+          cat >> $GITHUB_STEP_SUMMARY <<CERT_EOF
           # 📜 Execution Certificate
-          
+
           ## Execution Metadata
-          
+
           | Field | Value |
           |-------|-------|
-          | **Certificate ID** | `${{ github.run_id }}-${{ github.run_number }}` |
-          | **Timestamp** | `${{ steps.metadata.outputs.timestamp }}` |
+          | **Certificate ID** | \`${RUN_ID}-${RUN_NUMBER}\` |
+          | **Timestamp** | \`${META_TIMESTAMP}\` |
           | **Status** | ✅ Success |
-          | **Duration** | `DURATION_PLACEHOLDER` seconds |
-          
+          | **Duration** | \`${DURATION}\` seconds |
+
           ## Dataset
-          
+
           | Field | Value |
           |-------|-------|
-          | **Hash** | `${{ steps.dataset.outputs.dataset_hash }}` |
-          | **Size** | `${{ steps.dataset.outputs.dataset_size }}` bytes |
-          | **Source** | Secret: `${{ github.event.inputs.dataset_secret }}` |
+          | **Hash** | \`${DS_HASH}\` |
+          | **Size** | \`${DS_SIZE}\` bytes |
+          | **Source** | Secret: \`${INPUT_DATASET_SECRET}\` |
           | **Status** | ⚠️  **NEVER STORED** (ephemeral, deleted after execution) |
-          
+
           ## Sandbox Specification
-          
+
           | Field | Value |
           |-------|-------|
-          | **LLM Model** | `${{ github.event.inputs.model }}` |
-          | **Tools** | `${{ github.event.inputs.tools }}` |
-          | **Tokens Used** | `TOKENS_PLACEHOLDER` |
-          
+          | **LLM Model** | \`${INPUT_MODEL}\` |
+          | **Tools** | \`${INPUT_TOOLS}\` |
+          | **Tokens Used** | \`${TOKENS}\` |
+
           ### Prompt
-          ```
-          ${{ github.event.inputs.llm_prompt }}
-          ```
-          
+          \`\`\`
+          ${INPUT_PROMPT}
+          \`\`\`
+
           ## Result
-          
-          ```
-          RESULT_PLACEHOLDER
-          ```
-          
+
+          \`\`\`
+          ${RESULT}
+          \`\`\`
+
           ## Execution Trace
-          
-          ```json
-          TRACE_PLACEHOLDER
-          ```
-          
+
+          \`\`\`json
+          ${TRACE}
+          \`\`\`
+
           ## Verification
-          
-          ✅ **Certificate URL:** https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          
+
+          ✅ **Certificate URL:** https://github.com/${REPO}/actions/runs/${RUN_ID}
+
           Anyone can verify:
           - ✅ Execution happened at specified time
           - ✅ Used specified prompt and model
           - ✅ Dataset hash matches expected value
           - ✅ Result is authentic (tamper-proof logs)
           - ❌ Private dataset NOT accessible (deleted)
-          
+
           ## Lifecycle
-          
+
           | Event | Status |
           |-------|--------|
           | Dataset loaded | ✅ Complete |
@@ -238,31 +270,17 @@ Analyze the dataset above according to the prompt. Be specific and provide evide
           | Result generated | ✅ Complete |
           | Dataset deleted | ✅ Complete (runner destroyed) |
           | Certificate issued | ✅ Complete |
-          
+
           ---
-          
-          **🦞 Ephemeral Sandbox Execution**  
+
+          **🦞 Ephemeral Sandbox Execution**
           Private data · Public proof · Zero retention
-          
-          EOF
-          
-          # Replace placeholders
-          sed -i "s/DURATION_PLACEHOLDER/${DURATION}/g" $GITHUB_STEP_SUMMARY
-          sed -i "s/TOKENS_PLACEHOLDER/${TOKENS}/g" $GITHUB_STEP_SUMMARY
-          
-          # Add result (escape for markdown)
-          {
-            echo ""
-            cat result.txt
-            echo ""
-          } > result_escaped.txt
-          
-          # Add trace
-          cat execution_trace.json > trace_escaped.json
-          
+
+          CERT_EOF
+
           # Print certificate URL
           echo "📜 Certificate URL:"
-          echo "   https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          echo "   https://github.com/${REPO}/actions/runs/${RUN_ID}"
           
       - name: Upload execution artifacts
         uses: actions/upload-artifact@v4
@@ -274,6 +292,9 @@ Analyze the dataset above according to the prompt. Be specific and provide evide
           retention-days: 90
       
       - name: Cleanup confirmation
+        env:
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
         run: |
           echo "🗑️  Runner cleanup initiated..."
           echo "   Dataset: Will be deleted (runner destroyed)"
@@ -282,4 +303,4 @@ Analyze the dataset above according to the prompt. Be specific and provide evide
           echo "   Artifacts: Retained for 90 days"
           echo ""
           echo "✅ Ephemeral execution complete!"
-          echo "   Certificate: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          echo "   Certificate: https://github.com/${REPO}/actions/runs/${RUN_ID}"

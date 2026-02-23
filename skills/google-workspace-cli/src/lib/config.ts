@@ -1,6 +1,6 @@
 import { homedir } from 'os';
 import { join } from 'path';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, rmSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, rmSync, chmodSync } from 'fs';
 import type { GwcliConfig, ProfileConfig, ProfileCredentials, OAuthCredentials, TokenData } from '../types/index.js';
 
 const CONFIG_DIR = join(homedir(), '.config', 'gwcli');
@@ -9,10 +9,14 @@ const CONFIG_FILE = join(CONFIG_DIR, 'config.json');
 
 export function ensureConfigDir(): void {
   if (!existsSync(CONFIG_DIR)) {
-    mkdirSync(CONFIG_DIR, { recursive: true });
+    mkdirSync(CONFIG_DIR, { recursive: true, mode: 0o700 });
+  } else {
+    chmodSync(CONFIG_DIR, 0o700);
   }
   if (!existsSync(PROFILES_DIR)) {
-    mkdirSync(PROFILES_DIR, { recursive: true });
+    mkdirSync(PROFILES_DIR, { recursive: true, mode: 0o700 });
+  } else {
+    chmodSync(PROFILES_DIR, 0o700);
   }
 }
 
@@ -28,10 +32,14 @@ export function getConfig(): GwcliConfig {
 
 export function saveConfig(config: GwcliConfig): void {
   ensureConfigDir();
-  writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
+  writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), { mode: 0o600 });
 }
 
 export function getProfileDir(profileName: string): string {
+  // Strict allowlist: alphanumeric, hyphens, underscores only (1-64 chars)
+  if (!/^[a-zA-Z0-9_-]{1,64}$/.test(profileName)) {
+    throw new Error(`Invalid profile name: "${profileName}". Use only letters, numbers, hyphens, and underscores (1-64 chars).`);
+  }
   return join(PROFILES_DIR, profileName);
 }
 
@@ -62,7 +70,7 @@ export function saveProfileConfig(profileName: string, config: ProfileConfig): v
   if (!existsSync(profileDir)) {
     mkdirSync(profileDir, { recursive: true });
   }
-  writeFileSync(join(profileDir, 'config.json'), JSON.stringify(config, null, 2));
+  writeFileSync(join(profileDir, 'config.json'), JSON.stringify(config, null, 2), { mode: 0o600 });
 }
 
 export function getProfileCredentials(profileName: string): ProfileCredentials | null {
@@ -76,9 +84,10 @@ export function getProfileCredentials(profileName: string): ProfileCredentials |
 export function saveProfileCredentials(profileName: string, credentials: ProfileCredentials): void {
   const profileDir = getProfileDir(profileName);
   if (!existsSync(profileDir)) {
-    mkdirSync(profileDir, { recursive: true });
+    mkdirSync(profileDir, { recursive: true, mode: 0o700 });
   }
-  writeFileSync(join(profileDir, 'credentials.json'), JSON.stringify(credentials, null, 2));
+  const credsPath = join(profileDir, 'credentials.json');
+  writeFileSync(credsPath, JSON.stringify(credentials, null, 2), { mode: 0o600 });
 }
 
 export function deleteProfile(profileName: string): boolean {

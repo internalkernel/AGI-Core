@@ -82,8 +82,8 @@ if [ -d "/home/node/.openclaw" ]; then
     exit 1
 fi
 
-# Check we don't have unexpected environment variables
-if env | grep -i "password\|secret\|token" | grep -v "SECRET_KEY"; then
+# Check we don't have unexpected environment variables (names only, no values)
+if env | cut -d= -f1 | grep -i "password\|secret\|token" | grep -v "SECRET_KEY"; then
     echo "❌ SECURITY ISSUE: Sensitive env vars exposed!"
     exit 1
 fi

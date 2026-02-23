@@ -27,10 +27,12 @@ jobs:
           pip install anthropic
       
       - name: 📋 Start Inspection
+        env:
+          API_PROVIDER: ${{ github.event.inputs.api_provider }}
         run: |
           echo "## 🔍 API Key Verification Certificate" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Provider:** ${{ github.event.inputs.api_provider }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Provider:** $API_PROVIDER" >> $GITHUB_STEP_SUMMARY
           echo "**Timestamp:** $(date -Iseconds)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
       
