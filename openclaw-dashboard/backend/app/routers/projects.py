@@ -5,9 +5,11 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Query, HTTPException
+from fastapi import APIRouter, Depends, Query, HTTPException
 
 from app.config import settings
+from app.services.auth import require_admin
+from app.models.database import User
 
 router = APIRouter(tags=["projects"])
 
@@ -18,10 +20,10 @@ MAX_FILE_SIZE = 50 * 1024  # 50KB
 # Only allow alphanumeric, hyphens, and underscores in agent IDs
 _SAFE_AGENT_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
 
-# File extensions that must never be served (secrets, keys, credentials)
-_BLOCKED_EXTENSIONS = {
-    ".env", ".key", ".pem", ".p12", ".pfx", ".jks", ".keystore",
-    ".secret", ".credentials", ".htpasswd", ".pgpass",
+# Allowlist of file extensions safe for preview (strict allowlist > denylist)
+_ALLOWED_TEXT_EXTENSIONS = {
+    ".md", ".txt", ".json", ".yaml", ".yml", ".toml", ".csv",
+    ".html", ".css", ".js", ".ts", ".py", ".sh", ".xml",
 }
 
 
@@ -80,7 +82,7 @@ def _build_tree(path: Path, depth: int = 0, counter: list | None = None) -> dict
 
 
 @router.get("/api/projects")
-async def list_projects(agent: str = Query(..., description="Agent ID")):
+async def list_projects(agent: str = Query(..., description="Agent ID"), _admin: User = Depends(require_admin)):
     projects = _validate_agent(agent)
     if not projects.exists():
         return {"agent": agent, "projects": []}
@@ -120,7 +122,7 @@ async def list_projects(agent: str = Query(..., description="Agent ID")):
 
 
 @router.get("/api/projects/{agent_id}/{project_name}/tree")
-async def project_tree(agent_id: str, project_name: str):
+async def project_tree(agent_id: str, project_name: str, _admin: User = Depends(require_admin)):
     projects = _validate_agent(agent_id)
     project_path = _safe_resolve(projects, project_name)
     if not project_path.exists() or not project_path.is_dir():
@@ -129,26 +131,22 @@ async def project_tree(agent_id: str, project_name: str):
 
 
 @router.get("/api/projects/{agent_id}/file")
-async def read_file(agent_id: str, path: str = Query(..., description="Relative path within projects/")):
+async def read_file(agent_id: str, path: str = Query(..., description="Relative path within projects/"), _admin: User = Depends(require_admin)):
     projects = _validate_agent(agent_id)
     file_path = _safe_resolve(projects, path)
     if not file_path.exists() or not file_path.is_file():
         raise HTTPException(status_code=404, detail="File not found")
 
+    # Block dotfiles
+    if file_path.name.startswith("."):
+        raise HTTPException(status_code=403, detail="Access denied")
+
     stat = file_path.stat()
     name = file_path.name
 
-    # Block sensitive file types
-    suffix = name.lower().rsplit(".", 1)
-    if len(suffix) > 1 and f".{suffix[-1]}" in _BLOCKED_EXTENSIONS:
-        raise HTTPException(status_code=403, detail="Access to this file type is not allowed")
-
-    is_text = name.lower().endswith(
-        (".md", ".txt", ".json", ".yaml", ".yml", ".toml", ".csv", ".html", ".css",
-         ".js", ".ts", ".py", ".sh", ".xml", ".ini", ".cfg", ".log")
-    )
-
-    if not is_text:
+    # Strict allowlist — only serve known-safe text extensions
+    ext = Path(name).suffix.lower()
+    if ext not in _ALLOWED_TEXT_EXTENSIONS:
         return {"name": name, "content": None, "size": stat.st_size, "binary": True}
 
     if stat.st_size > MAX_FILE_SIZE:

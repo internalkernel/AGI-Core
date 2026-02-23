@@ -60,18 +60,15 @@ async def list_devices():
 
 @router.get("/health")
 async def health_check():
+    """Minimal liveness probe — no internal topology exposed."""
     import httpx
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.get(f"{settings.gateway_url}/health", timeout=1.0)
             return {
                 "status": "healthy" if resp.status_code == 200 else "unhealthy",
-                "gateway": settings.gateway_url,
-                "gateway_status": resp.status_code,
             }
     except Exception:
         return {
             "status": "degraded",
-            "gateway": settings.gateway_url,
-            "gateway_status": "unreachable",
         }

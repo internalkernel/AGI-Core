@@ -1,5 +1,6 @@
 """Authentication endpoints — login, profile, password change, lockout management."""
 
+import time
 from datetime import datetime, timezone
 from typing import List
 
@@ -21,6 +22,10 @@ MAX_ATTEMPTS = 3
 LOCKOUT_SECONDS = 60 * 60  # 60 minutes
 _FAIL_PREFIX = "login_fail:"
 _LOCK_PREFIX = "login_lock:"
+
+# In-memory fallback when Redis is unavailable
+_mem_fails: dict[str, list[float]] = {}   # ip -> [timestamps]
+_mem_locks: dict[str, float] = {}          # ip -> locked_until_ts
 
 
 class LoginRequest(BaseModel):
@@ -52,31 +57,57 @@ def _client_ip(request: Request) -> str:
 async def login(body: LoginRequest, request: Request, session: AsyncSession = Depends(get_session)):
     redis = get_redis()
     ip = _client_ip(request)
+    now_ts = int(datetime.now(timezone.utc).timestamp())
 
-    # Check lockout
+    # Check lockout (Redis or in-memory)
     if redis:
         locked_until = await redis.get(f"{_LOCK_PREFIX}{ip}")
         if locked_until:
-            remaining = int(float(locked_until)) - int(datetime.now(timezone.utc).timestamp())
+            remaining = int(float(locked_until)) - now_ts
             minutes = max(1, remaining // 60)
             raise HTTPException(
                 status_code=status.HTTP_423_LOCKED,
                 detail=f"Too many failed attempts. Try again in {minutes} minute{'s' if minutes != 1 else ''}.",
             )
+    else:
+        lock_ts = _mem_locks.get(ip, 0)
+        if lock_ts > now_ts:
+            remaining = int(lock_ts) - now_ts
+            minutes = max(1, remaining // 60)
+            raise HTTPException(
+                status_code=status.HTTP_423_LOCKED,
+                detail=f"Too many failed attempts. Try again in {minutes} minute{'s' if minutes != 1 else ''}.",
+            )
+        elif lock_ts:
+            _mem_locks.pop(ip, None)
 
     result = await session.execute(select(User).where(User.username == body.username))
     user = result.scalar_one_or_none()
     if user is None or not verify_password(body.password, user.hashed_password):
-        # Record failed attempt
+        # Record failed attempt (Redis or in-memory)
         if redis:
             key = f"{_FAIL_PREFIX}{ip}"
             count = await redis.incr(key)
             if count == 1:
                 await redis.expire(key, LOCKOUT_SECONDS)
             if count >= MAX_ATTEMPTS:
-                lock_until = int(datetime.now(timezone.utc).timestamp()) + LOCKOUT_SECONDS
+                lock_until = now_ts + LOCKOUT_SECONDS
                 await redis.set(f"{_LOCK_PREFIX}{ip}", str(lock_until), ex=LOCKOUT_SECONDS)
                 await redis.delete(key)
+                raise HTTPException(
+                    status_code=status.HTTP_423_LOCKED,
+                    detail="Too many failed attempts. Try again in 60 minutes.",
+                )
+        else:
+            now_f = time.time()
+            cutoff = now_f - LOCKOUT_SECONDS
+            fails = _mem_fails.setdefault(ip, [])
+            fails = [t for t in fails if t > cutoff]
+            fails.append(now_f)
+            _mem_fails[ip] = fails
+            if len(fails) >= MAX_ATTEMPTS:
+                _mem_locks[ip] = now_f + LOCKOUT_SECONDS
+                _mem_fails.pop(ip, None)
                 raise HTTPException(
                     status_code=status.HTTP_423_LOCKED,
                     detail="Too many failed attempts. Try again in 60 minutes.",
@@ -86,6 +117,9 @@ async def login(body: LoginRequest, request: Request, session: AsyncSession = De
     # Success — clear any failed attempt tracking for this IP
     if redis:
         await redis.delete(f"{_FAIL_PREFIX}{ip}", f"{_LOCK_PREFIX}{ip}")
+    else:
+        _mem_fails.pop(ip, None)
+        _mem_locks.pop(ip, None)
     user.last_login = datetime.now(timezone.utc)
     await session.commit()
     token = create_access_token(user.id)

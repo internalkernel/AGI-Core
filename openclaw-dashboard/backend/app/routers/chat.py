@@ -389,9 +389,13 @@ async def websocket_chat(websocket: WebSocket, agent: str | None = None):
                     pass
 
             async def client_to_gateway():
+                MAX_MSG_SIZE = 32_768  # 32KB
                 try:
                     while True:
                         raw = await websocket.receive_text()
+                        if len(raw) > MAX_MSG_SIZE:
+                            await websocket.send_json({"type": "error", "error": "Message too large"})
+                            continue
                         data = json.loads(raw)
                         message = data.get("content", data.get("message", ""))
                         session_key = data.get("sessionKey", "main")

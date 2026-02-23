@@ -15,7 +15,7 @@ router = APIRouter(tags=["sessions_mgmt"])
 
 
 @router.get("/api/sessions/list")
-async def list_sessions(agent: Optional[str] = Query(None)):
+async def list_sessions(agent: Optional[str] = Query(None), _admin: User = Depends(require_admin)):
     """List all sessions — tries RPC, falls back to file."""
     try:
         result = await gateway_call("sessions.list", agent=agent)
@@ -27,7 +27,7 @@ async def list_sessions(agent: Optional[str] = Query(None)):
 
 
 @router.get("/api/sessions/{session_id}/usage")
-async def session_usage(session_id: str, agent: Optional[str] = Query(None)):
+async def session_usage(session_id: str, agent: Optional[str] = Query(None), _admin: User = Depends(require_admin)):
     """Get session usage/cost via RPC."""
     try:
         result = await gateway_call("sessions.usage", {"sessionId": session_id}, agent=agent)
@@ -81,7 +81,7 @@ async def delete_session(session_id: str, _admin: User = Depends(require_admin),
 
 
 @router.get("/api/sessions/{session_id}/history")
-async def session_history(session_id: str, agent: Optional[str] = Query(None)):
+async def session_history(session_id: str, agent: Optional[str] = Query(None), _admin: User = Depends(require_admin)):
     """Get chat history for a session via RPC."""
     try:
         result = await gateway_call("chat.history", {"sessionId": session_id}, agent=agent)
@@ -93,7 +93,7 @@ async def session_history(session_id: str, agent: Optional[str] = Query(None)):
 
 
 @router.get("/api/sessions/usage/timeseries")
-async def usage_timeseries(agent: Optional[str] = Query(None)):
+async def usage_timeseries(agent: Optional[str] = Query(None), _admin: User = Depends(require_admin)):
     """Get usage timeseries via RPC."""
     try:
         result = await gateway_call("sessions.usage.timeseries", agent=agent)

@@ -5,10 +5,12 @@ from pathlib import Path
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 
 from app.config import settings
 from app.discovery.engine import run_discovery, get_cached_result, discover_skills
+from app.services.auth import require_admin
+from app.models.database import User
 
 router = APIRouter(tags=["discovery"])
 
@@ -55,7 +57,7 @@ async def list_agents():
 
 
 @router.get("/api/agents/{agent_name}")
-async def get_agent_detail(agent_name: str):
+async def get_agent_detail(agent_name: str, _admin: User = Depends(require_admin)):
     """Get extended agent info: identity, workspace config, tools, gateway status."""
     result = get_cached_result()
     if not result:
@@ -114,6 +116,9 @@ async def get_agent_detail(agent_name: str):
     # List shared skills
     skills = discover_skills()
     agent["tools"] = [{"name": s["name"], "category": s["category"]} for s in skills]
+
+    # Strip internal filesystem paths before returning
+    agent.pop("workspace", None)
 
     return agent
 
