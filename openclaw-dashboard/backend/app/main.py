@@ -14,7 +14,8 @@ from app.config import settings
 from app.discovery.engine import run_discovery, needs_refresh
 from app.websocket.manager import manager
 from app.middleware.security import SecurityHeadersMiddleware, RequestSizeLimitMiddleware, RateLimitMiddleware
-from app.db.connection import init_db, close_db, async_session_factory
+from app.db.connection import init_db, close_db
+from app.db import connection as db_conn
 from app.redis.client import init_redis, close_redis
 from app.services.auth import seed_admin, decode_token, authenticate_websocket
 from app.routers import (
@@ -47,8 +48,8 @@ async def lifespan(_app: FastAPI):
     await init_redis()
 
     # Seed admin user
-    if async_session_factory:
-        async with async_session_factory() as session:
+    if db_conn.async_session_factory:
+        async with db_conn.async_session_factory() as session:
             await seed_admin(session)
 
     run_discovery()
@@ -113,12 +114,12 @@ async def auth_middleware(request: Request, call_next):
     if auth_header.startswith("Bearer "):
         token = auth_header[7:]
         user_id = decode_token(token)
-        if user_id and async_session_factory:
+        if user_id and db_conn.async_session_factory:
             # Verify user still exists in the database
             import uuid
             from sqlmodel import select
             from app.models.database import User
-            async with async_session_factory() as session:
+            async with db_conn.async_session_factory() as session:
                 result = await session.execute(
                     select(User.id).where(User.id == uuid.UUID(user_id))
                 )
