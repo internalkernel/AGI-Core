@@ -47,7 +47,7 @@ const VALID_ROLES = new Set(["system", "user", "assistant"]);
 // ─── Tier → Model mapping ───────────────────────────────────────────────────
 const TIER_MODELS = {
   SIMPLE:    { provider: "openai",    model: "gpt-4.1-nano" },
-  MEDIUM:    { provider: "gemini",    model: "gemini-2.5-pro" },
+  MEDIUM:    { provider: "gemini",    model: "gemini-3.1-pro-preview" },
   COMPLEX:   { provider: "anthropic", model: "claude-sonnet-4-6" },
   CODEX:     { provider: "openai",    model: "gpt-5.2-codex" },
   REASONING: { provider: "synthetic", model: "hf:moonshotai/Kimi-K2.5" },
