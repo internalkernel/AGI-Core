@@ -1,3 +1,4 @@
+import { apiFetch } from '../api/client';
 import { useEffect, useState } from 'react';
 import { useStore } from '../store';
 import { AGENTS } from '../constants/agents';
@@ -31,8 +32,7 @@ export default function SkillsPage() {
     setSelectedSkill(name);
     setDetailSkill(skills.find(s => s.name === name) || null);
     try {
-      const res = await fetch(`/api/skills/${name}`);
-      const data = await res.json();
+      const data = await apiFetch<{ readme?: string }>(`/api/skills/${name}`);
       setReadme(data.readme || 'No README available.');
     } catch {
       setReadme('Failed to load details.');
