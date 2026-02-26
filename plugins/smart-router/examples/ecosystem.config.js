@@ -49,7 +49,7 @@ module.exports = {
         OPENCLAW_AGENT_NAME: 'Content Specialist Agent',
         OPENCLAW_PORT: '8410',
         // WARNING: Replace with a strong random token in production
-        OPENCLAW_GATEWAY_TOKEN: 'content-specialist-token-2024',
+        OPENCLAW_GATEWAY_TOKEN: process.env.OPENCLAW_GATEWAY_TOKEN || 'CHANGE_ME',
         ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
         GOOGLE_API_KEY: process.env.GOOGLE_API_KEY,
         SYNTHETIC_API_KEY: process.env.SYNTHETIC_API_KEY,
@@ -71,7 +71,7 @@ module.exports = {
         OPENCLAW_AGENT_NAME: 'DevOps Agent',
         OPENCLAW_PORT: '8420',
         // WARNING: Replace with a strong random token in production
-        OPENCLAW_GATEWAY_TOKEN: 'devops-token-2024',
+        OPENCLAW_GATEWAY_TOKEN: process.env.OPENCLAW_GATEWAY_TOKEN || 'CHANGE_ME',
         ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
         GOOGLE_API_KEY: process.env.GOOGLE_API_KEY,
         SYNTHETIC_API_KEY: process.env.SYNTHETIC_API_KEY,
