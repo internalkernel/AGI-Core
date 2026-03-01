@@ -159,13 +159,17 @@ export async function initiateOAuthFlow(
   const { tokens } = await oauth2Client.getToken(code);
   oauth2Client.setCredentials(tokens);
 
-  // Store the credentials
+  // Validate required token fields before storing
+  if (!tokens.access_token || !tokens.refresh_token) {
+    throw new Error('OAuth token exchange did not return required tokens (access_token, refresh_token).');
+  }
+
   const tokenData: TokenData = {
-    access_token: tokens.access_token!,
-    refresh_token: tokens.refresh_token!,
-    scope: tokens.scope!,
-    token_type: tokens.token_type!,
-    expiry_date: tokens.expiry_date!,
+    access_token: tokens.access_token,
+    refresh_token: tokens.refresh_token,
+    scope: tokens.scope || SCOPES.join(' '),
+    token_type: tokens.token_type || 'Bearer',
+    expiry_date: tokens.expiry_date || 0,
   };
 
   const credentials: ProfileCredentials = {
@@ -215,18 +219,22 @@ export async function getAuthenticatedClient(profileName: string): Promise<OAuth
 
   // Set up automatic token refresh
   oauth2Client.on('tokens', (tokens) => {
-    // Update stored tokens when they're refreshed
-    const updatedCredentials: ProfileCredentials = {
-      ...credentials,
-      tokens: {
-        access_token: tokens.access_token!,
-        refresh_token: tokens.refresh_token || credentials.tokens.refresh_token,
-        scope: tokens.scope || credentials.tokens.scope,
-        token_type: tokens.token_type || credentials.tokens.token_type,
-        expiry_date: tokens.expiry_date || credentials.tokens.expiry_date,
-      },
-    };
-    saveProfileCredentials(profileName, updatedCredentials);
+    try {
+      if (!tokens.access_token) return;
+      const updatedCredentials: ProfileCredentials = {
+        ...credentials,
+        tokens: {
+          access_token: tokens.access_token,
+          refresh_token: tokens.refresh_token || credentials.tokens.refresh_token,
+          scope: tokens.scope || credentials.tokens.scope,
+          token_type: tokens.token_type || credentials.tokens.token_type,
+          expiry_date: tokens.expiry_date || credentials.tokens.expiry_date,
+        },
+      };
+      saveProfileCredentials(profileName, updatedCredentials);
+    } catch (err) {
+      console.error(`Failed to persist refreshed tokens for profile "${profileName}":`, err);
+    }
   });
 
   // Check if token is expired and refresh if needed

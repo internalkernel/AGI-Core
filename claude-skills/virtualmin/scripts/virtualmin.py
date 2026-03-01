@@ -194,7 +194,7 @@ def cmd_server_add(args):
         "port": args.port,
         "username": args.user,
         "password": password,
-        "verify_ssl": not args.no_verify,
+        "verify_ssl": args.verify_ssl,
         "added": datetime.now(timezone.utc).isoformat(),
     }
     save_servers(servers)
@@ -507,7 +507,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--user", required=True, help="Virtualmin admin username")
     p.add_argument("--pass", dest="password", default="", help="Admin password (or set VM_PASSWORD env var)")
     p.add_argument("--port", type=int, default=10000, help="Webmin port (default: 10000)")
-    p.add_argument("--no-verify", action="store_true", help="Skip SSL certificate verification (default: verify is off)")
+    p.add_argument("--verify-ssl", action="store_true", help="Enable SSL certificate verification (default: off for self-signed certs)")
     p.add_argument("--name", help="Human-readable label")
 
     p = server_sub.add_parser("remove", help="Remove a registered server")

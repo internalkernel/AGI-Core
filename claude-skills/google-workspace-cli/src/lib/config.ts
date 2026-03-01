@@ -68,7 +68,7 @@ export function getProfileConfig(profileName: string): ProfileConfig | null {
 export function saveProfileConfig(profileName: string, config: ProfileConfig): void {
   const profileDir = getProfileDir(profileName);
   if (!existsSync(profileDir)) {
-    mkdirSync(profileDir, { recursive: true });
+    mkdirSync(profileDir, { recursive: true, mode: 0o700 });
   }
   writeFileSync(join(profileDir, 'config.json'), JSON.stringify(config, null, 2), { mode: 0o600 });
 }

@@ -4,7 +4,6 @@ import { EmailMessage, EmailDetail } from '../types/index.js';
 
 export class GmailClient {
   private gmail: gmail_v1.Gmail;
-  private userEmail?: string;
 
   constructor(auth: OAuth2Client) {
     this.gmail = google.gmail({ version: 'v1', auth });
@@ -185,9 +184,8 @@ export class GmailClient {
     const threadId = original.data.threadId || '';
 
     // Extract email from "Name <email>" format
-    const toEmail = originalFrom.match(/<(.+)>/)
-      ? originalFrom.match(/<(.+)>/)![1]
-      : originalFrom;
+    const emailMatch = originalFrom.match(/<(.+)>/);
+    const toEmail = emailMatch ? emailMatch[1] : originalFrom;
 
     const replySubject = originalSubject.startsWith('Re:')
       ? originalSubject

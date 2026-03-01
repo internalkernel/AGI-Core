@@ -15,8 +15,9 @@ export class DriveClient {
    * List files/folders from Google Drive
    */
   async list(options?: { folderId?: string; maxResults?: number }): Promise<DriveFile[]> {
-    const query = options?.folderId
-      ? `'${options.folderId}' in parents and trashed = false`
+    const folderId = options?.folderId?.replace(/'/g, "\\'") ?? '';
+    const query = folderId
+      ? `'${folderId}' in parents and trashed = false`
       : 'trashed = false';
 
     const response = await this.drive.files.list({

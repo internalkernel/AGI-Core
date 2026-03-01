@@ -13,6 +13,7 @@ Requires WP-CLI installed on the remote server and SSH key access.
 import argparse
 import json
 import os
+import stat
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -35,6 +36,7 @@ def load_sites() -> dict:
 def save_sites(sites: dict):
     path = get_data_dir() / "sites.json"
     path.write_text(json.dumps(sites, indent=2) + "\n")
+    path.chmod(stat.S_IRUSR | stat.S_IWUSR)  # 600
 
 
 def get_site(alias: str) -> dict:

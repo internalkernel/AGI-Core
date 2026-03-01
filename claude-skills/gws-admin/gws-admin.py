@@ -54,14 +54,19 @@ def run_gam(args: list[str], *, capture: bool = True, env: dict | None = None,
     if env is None:
         env = ensure_gam_env()
     # Use tempfile for password to avoid /proc exposure
-    pw_tmpfile = None
+    pw_tmppath = None
     if password:
         import tempfile
-        pw_tmpfile = tempfile.NamedTemporaryFile(mode="w", suffix=".pw", delete=False)
-        pw_tmpfile.write(password)
-        pw_tmpfile.close()
-        os.chmod(pw_tmpfile.name, 0o600)
-        cmd.extend(["password", f"file:{pw_tmpfile.name}"])
+        # Atomic create with 0o600 — no race window between create and chmod
+        fd = os.open(
+            os.path.join(tempfile.gettempdir(), f"gam_pw_{os.getpid()}.tmp"),
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            0o600,
+        )
+        pw_tmppath = os.path.join(tempfile.gettempdir(), f"gam_pw_{os.getpid()}.tmp")
+        with os.fdopen(fd, "w") as pw_f:
+            pw_f.write(password)
+        cmd.extend(["password", f"file:{pw_tmppath}"])
     try:
         if capture:
             return subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=300)
@@ -77,9 +82,9 @@ def run_gam(args: list[str], *, capture: bool = True, env: dict | None = None,
         print(f"ERROR: Failed to execute GAM: {e}", file=sys.stderr)
         sys.exit(1)
     finally:
-        if pw_tmpfile:
+        if pw_tmppath:
             try:
-                os.unlink(pw_tmpfile.name)
+                os.unlink(pw_tmppath)
             except OSError:
                 pass
 

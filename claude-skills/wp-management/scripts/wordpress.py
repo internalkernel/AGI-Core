@@ -373,8 +373,9 @@ def cmd_media_upload(args):
     url = site["url"].rstrip("/") + "/wp-json/wp/v2/media"
     pinned_ip = _validate_site_url(url)
     auth = (site["username"], site["app_password"])
+    safe_filename = filepath.name.replace('"', '_').replace('\\', '_')
     headers = {
-        "Content-Disposition": f'attachment; filename="{filepath.name}"',
+        "Content-Disposition": f'attachment; filename="{safe_filename}"',
         "Content-Type": mime,
     }
 
