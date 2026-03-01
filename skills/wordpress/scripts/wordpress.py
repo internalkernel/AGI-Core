@@ -27,21 +27,33 @@ def get_data_dir() -> Path:
         d = Path(workspace) / "cache" / "wordpress"
     else:
         d = Path.home() / ".openclaw" / "skills" / "wordpress" / "data"
-    d.mkdir(parents=True, exist_ok=True)
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        stderr(f"Error creating data directory {d}: {e}")
+        sys.exit(1)
     return d
 
 
 def load_sites() -> dict:
-    path = get_data_dir() / "sites.json"
-    if path.exists():
-        return json.loads(path.read_text())
+    try:
+        path = get_data_dir() / "sites.json"
+        if path.exists():
+            return json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError) as e:
+        stderr(f"Error reading sites data: {e}")
+        sys.exit(1)
     return {}
 
 
 def save_sites(sites: dict):
-    path = get_data_dir() / "sites.json"
-    path.write_text(json.dumps(sites, indent=2) + "\n")
-    path.chmod(stat.S_IRUSR | stat.S_IWUSR)  # 600
+    try:
+        path = get_data_dir() / "sites.json"
+        path.write_text(json.dumps(sites, indent=2) + "\n")
+        path.chmod(stat.S_IRUSR | stat.S_IWUSR)  # 600
+    except OSError as e:
+        stderr(f"Error saving sites data: {e}")
+        sys.exit(1)
 
 
 def get_site(alias: str) -> dict:
@@ -132,8 +144,9 @@ def _pinned_dns(hostname: str, pinned_ip: str):
 
 def wp_request(site: dict, method: str, endpoint: str,
                params: dict | None = None, json_data: dict | None = None,
-               files: dict | None = None) -> dict | list:
-    """Make an authenticated request to the WordPress REST API."""
+               files: dict | None = None, optional: bool = False) -> dict | list | None:
+    """Make an authenticated request to the WordPress REST API.
+    If optional=True, return None on HTTP errors instead of exiting."""
     url = site["url"].rstrip("/") + "/wp-json/" + endpoint.lstrip("/")
     # Validate URL and get pinned IP (eliminates DNS-rebinding TOCTOU)
     pinned_ip = _validate_site_url(url)
@@ -154,6 +167,8 @@ def wp_request(site: dict, method: str, endpoint: str,
         with _pinned_dns(hostname, pinned_ip):
             resp = requests.request(method, url, **kwargs)
     except requests.RequestException as e:
+        if optional:
+            return None
         stderr(f"Request failed: {e}")
         sys.exit(1)
 
@@ -163,12 +178,16 @@ def wp_request(site: dict, method: str, endpoint: str,
     try:
         data = resp.json()
     except ValueError:
+        if optional:
+            return None
         stderr(f"Non-JSON response ({resp.status_code}): {resp.text[:200]}")
         sys.exit(1)
 
     if resp.status_code >= 400:
-        code = data.get("code", "unknown")
-        message = data.get("message", resp.text[:200])
+        if optional:
+            return None
+        code = data.get("code", "unknown") if isinstance(data, dict) else "unknown"
+        message = data.get("message", resp.text[:200]) if isinstance(data, dict) else resp.text[:200]
         stderr(f"API error {resp.status_code}: [{code}] {message}")
         sys.exit(1)
 
@@ -185,7 +204,7 @@ def cmd_site_add(args):
         sys.exit(1)
 
     _validate_site_url(args.url)
-    if hasattr(args, "password") and args.password:
+    if hasattr(args, "password") and args.password and "WP_APP_PASSWORD" not in os.environ:
         stderr("Warning: --password is visible in process listings. Prefer setting WP_APP_PASSWORD env var.")
     sites[args.alias] = {
         "name": args.name or args.alias,
@@ -236,6 +255,16 @@ def cmd_content_list(args, endpoint: str):
         params["status"] = "publish,draft,pending,private,future"
     if hasattr(args, "search") and args.search:
         params["search"] = args.search
+    if hasattr(args, "page") and args.page:
+        params["page"] = args.page
+    if hasattr(args, "before") and args.before:
+        params["before"] = args.before
+    if hasattr(args, "after") and args.after:
+        params["after"] = args.after
+    if hasattr(args, "orderby") and args.orderby:
+        params["orderby"] = args.orderby
+    if hasattr(args, "order") and args.order:
+        params["order"] = args.order
     data = wp_request(site, "GET", f"wp/v2/{endpoint}", params=params)
     result = []
     for item in data:
@@ -274,7 +303,15 @@ def cmd_content_create(args, endpoint: str):
     site = get_site(args.alias)
     body = {"title": args.title, "content": args.content, "status": args.status}
     if hasattr(args, "categories") and args.categories:
-        body["categories"] = [int(c) for c in args.categories.split(",")]
+        try:
+            body["categories"] = [int(c) for c in args.categories.split(",")]
+        except ValueError:
+            stderr("Error: --categories must be comma-separated integers (e.g. 1,5,12)")
+            sys.exit(1)
+    if hasattr(args, "slug") and args.slug:
+        body["slug"] = args.slug
+    if hasattr(args, "parent") and args.parent is not None:
+        body["parent"] = args.parent
     data = wp_request(site, "POST", f"wp/v2/{endpoint}", json_data=body)
     print(json.dumps({
         "ok": True,
@@ -294,8 +331,12 @@ def cmd_content_update(args, endpoint: str):
         body["content"] = args.content
     if args.status:
         body["status"] = args.status
+    if hasattr(args, "slug") and args.slug:
+        body["slug"] = args.slug
+    if hasattr(args, "parent") and args.parent is not None:
+        body["parent"] = args.parent
     if not body:
-        stderr("Nothing to update. Provide --title, --content, or --status.")
+        stderr("Nothing to update. Provide --title, --content, --status, --slug, or --parent.")
         sys.exit(1)
     data = wp_request(site, "POST", f"wp/v2/{endpoint}/{args.id}", json_data=body)
     print(json.dumps({
@@ -372,6 +413,9 @@ def cmd_media_upload(args):
         with open(filepath, "rb") as f:
             with _pinned_dns(hostname, pinned_ip):
                 resp = requests.post(url, auth=auth, headers=headers, data=f, timeout=120, allow_redirects=False)
+    except OSError as e:
+        stderr(f"Error reading file: {e}")
+        sys.exit(1)
     except requests.RequestException as e:
         stderr(f"Upload failed: {e}")
         sys.exit(1)
@@ -444,6 +488,127 @@ def cmd_tags_list(args):
     result = [{"id": t["id"], "name": t["name"], "slug": t["slug"],
                "count": t.get("count", 0)} for t in data]
     print(json.dumps(result, indent=2))
+
+
+# --- Plugins (WP 5.5+) ---
+
+
+def cmd_plugins_list(args):
+    site = get_site(args.alias)
+    params = {}
+    if hasattr(args, "status") and args.status:
+        params["status"] = args.status
+    data = wp_request(site, "GET", "wp/v2/plugins", params=params)
+    result = []
+    for p in data:
+        result.append({
+            "plugin": p.get("plugin"),
+            "name": p.get("name"),
+            "version": p.get("version"),
+            "status": p.get("status"),
+            "description": p.get("description", {}).get("raw", "") if isinstance(p.get("description"), dict) else p.get("description", ""),
+            "author": p.get("author"),
+            "plugin_uri": p.get("plugin_uri"),
+            "requires_wp": p.get("requires_wp"),
+            "requires_php": p.get("requires_php"),
+        })
+    print(json.dumps(result, indent=2))
+
+
+def cmd_plugins_get(args):
+    site = get_site(args.alias)
+    from urllib.parse import quote
+    plugin_slug = quote(args.plugin, safe="")
+    data = wp_request(site, "GET", f"wp/v2/plugins/{plugin_slug}")
+    print(json.dumps(data, indent=2))
+
+
+def cmd_plugins_activate(args):
+    site = get_site(args.alias)
+    from urllib.parse import quote
+    plugin_slug = quote(args.plugin, safe="")
+    data = wp_request(site, "POST", f"wp/v2/plugins/{plugin_slug}", json_data={"status": "active"})
+    print(json.dumps({"ok": True, "plugin": data.get("plugin"), "status": data.get("status")}, indent=2))
+    stderr(f"Activated plugin: {args.plugin}")
+
+
+def cmd_plugins_deactivate(args):
+    site = get_site(args.alias)
+    from urllib.parse import quote
+    plugin_slug = quote(args.plugin, safe="")
+    data = wp_request(site, "POST", f"wp/v2/plugins/{plugin_slug}", json_data={"status": "inactive"})
+    print(json.dumps({"ok": True, "plugin": data.get("plugin"), "status": data.get("status")}, indent=2))
+    stderr(f"Deactivated plugin: {args.plugin}")
+
+
+# --- Themes (WP 5.0+) ---
+
+
+def cmd_themes_list(args):
+    site = get_site(args.alias)
+    data = wp_request(site, "GET", "wp/v2/themes")
+    result = []
+    for t in data:
+        result.append({
+            "stylesheet": t.get("stylesheet"),
+            "name": t.get("name", {}).get("raw", t.get("name", "")) if isinstance(t.get("name"), dict) else t.get("name", ""),
+            "version": t.get("version"),
+            "status": t.get("status"),
+            "template": t.get("template"),
+            "author": t.get("author", {}).get("raw", t.get("author", "")) if isinstance(t.get("author"), dict) else t.get("author", ""),
+            "description": t.get("description", {}).get("raw", "") if isinstance(t.get("description"), dict) else t.get("description", ""),
+        })
+    print(json.dumps(result, indent=2))
+
+
+def cmd_themes_get(args):
+    site = get_site(args.alias)
+    from urllib.parse import quote
+    stylesheet = quote(args.stylesheet, safe="")
+    data = wp_request(site, "GET", f"wp/v2/themes/{stylesheet}")
+    print(json.dumps(data, indent=2))
+
+
+def cmd_themes_activate(args):
+    site = get_site(args.alias)
+    from urllib.parse import quote
+    stylesheet = quote(args.stylesheet, safe="")
+    # WP REST API activates a theme by setting its status
+    data = wp_request(site, "POST", f"wp/v2/themes/{stylesheet}", json_data={"status": "active"})
+    print(json.dumps({"ok": True, "stylesheet": data.get("stylesheet"), "status": data.get("status")}, indent=2))
+    stderr(f"Activated theme: {args.stylesheet}")
+
+
+# --- Settings (WP 4.7+) ---
+
+
+def cmd_settings_get(args):
+    site = get_site(args.alias)
+    data = wp_request(site, "GET", "wp/v2/settings")
+    print(json.dumps(data, indent=2))
+
+
+def cmd_settings_update(args):
+    site = get_site(args.alias)
+    body = {}
+    for pair in args.set:
+        key, _, value = pair.partition("=")
+        if not key or not _:
+            stderr(f"Invalid setting format: '{pair}'. Use key=value.")
+            sys.exit(1)
+        # Attempt to parse JSON values (booleans, numbers, null)
+        try:
+            body[key] = json.loads(value)
+        except (json.JSONDecodeError, ValueError):
+            body[key] = value
+    if not body:
+        stderr("Nothing to update. Provide --set key=value pairs.")
+        sys.exit(1)
+    data = wp_request(site, "POST", "wp/v2/settings", json_data=body)
+    # Return only the keys that were updated
+    result = {k: data.get(k) for k in body if k in data}
+    print(json.dumps({"ok": True, "updated": result}, indent=2))
+    stderr(f"Updated {len(result)} setting(s)")
 
 
 # --- Gravity Forms ---
@@ -526,23 +691,63 @@ def cmd_redirects_delete(args):
 
 def cmd_seo_get(args):
     site = get_site(args.alias)
-    data = wp_request(site, "GET", f"seopress/v1/posts/{args.post_id}/metadata")
-    print(json.dumps(data, indent=2))
+    # Fetch metadata (title, description) — required
+    metadata = wp_request(site, "GET", f"seopress/v1/posts/{args.post_id}/metadata")
+    # Fetch target keywords — optional (endpoint may not exist)
+    keywords = wp_request(site, "GET", f"seopress/v1/posts/{args.post_id}/target-keywords", optional=True)
+    # Fetch robots settings — optional (endpoint may not exist)
+    robots = wp_request(site, "GET", f"seopress/v1/posts/{args.post_id}/meta-robot-settings", optional=True)
+    # Merge into single response
+    result = {}
+    if isinstance(metadata, dict):
+        result.update(metadata)
+    if isinstance(keywords, dict):
+        result.update(keywords)
+    if isinstance(robots, dict):
+        result.update(robots)
+    print(json.dumps(result, indent=2))
 
 
 def cmd_seo_update(args):
     site = get_site(args.alias)
-    body = {}
+    updated = []
+
+    # 1. Title and/or description → PUT /metadata
+    meta_body = {}
     if args.title:
-        body["_seopress_titles_title"] = args.title
+        meta_body["_seopress_titles_title"] = args.title
     if args.description:
-        body["_seopress_titles_desc"] = args.description
-    if not body:
-        stderr("Nothing to update. Provide --title and/or --description.")
+        meta_body["_seopress_titles_desc"] = args.description
+    if meta_body:
+        wp_request(site, "PUT", f"seopress/v1/posts/{args.post_id}/metadata", json_data=meta_body)
+        updated.append("metadata")
+
+    # 2. Target keyword → PUT /target-keywords
+    if hasattr(args, "keyword") and args.keyword:
+        kw_body = {"_seopress_analysis_target_kw": args.keyword}
+        wp_request(site, "PUT", f"seopress/v1/posts/{args.post_id}/target-keywords", json_data=kw_body)
+        updated.append("target-keywords")
+
+    # 3. Robots (noindex/nofollow) → PUT /meta-robot-settings
+    robots_body = {}
+    if hasattr(args, "noindex") and args.noindex:
+        robots_body["_seopress_robots_index"] = "yes"
+    elif hasattr(args, "index") and getattr(args, "index"):
+        robots_body["_seopress_robots_index"] = ""
+    if hasattr(args, "nofollow") and args.nofollow:
+        robots_body["_seopress_robots_follow"] = "yes"
+    elif hasattr(args, "follow") and args.follow:
+        robots_body["_seopress_robots_follow"] = ""
+    if robots_body:
+        wp_request(site, "PUT", f"seopress/v1/posts/{args.post_id}/meta-robot-settings", json_data=robots_body)
+        updated.append("robots")
+
+    if not updated:
+        stderr("Nothing to update. Provide --title, --description, --keyword, --noindex, --index, --nofollow, or --follow.")
         sys.exit(1)
-    data = wp_request(site, "PUT", f"seopress/v1/posts/{args.post_id}/metadata", json_data=body)
-    print(json.dumps({"ok": True, "post_id": args.post_id}, indent=2))
-    stderr(f"Updated SEO metadata for post #{args.post_id}")
+
+    print(json.dumps({"ok": True, "post_id": args.post_id, "updated": updated}, indent=2))
+    stderr(f"Updated SEO {', '.join(updated)} for post #{args.post_id}")
 
 
 # --- Argument parser ---
@@ -560,7 +765,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("alias", help="Short alias for the site (e.g. 'prod')")
     p.add_argument("--url", required=True, help="Site URL (e.g. https://example.com)")
     p.add_argument("--user", required=True, help="WordPress username")
-    p.add_argument("--password", required=True, help="Application password")
+    p.add_argument("--password", default=os.environ.get("WP_APP_PASSWORD"), required="WP_APP_PASSWORD" not in os.environ, help="Application password (or set WP_APP_PASSWORD env var)")
     p.add_argument("--name", help="Human-readable label")
 
     p = site_sub.add_parser("remove", help="Remove a registered site")
@@ -577,6 +782,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--status", default="publish", help="Filter by status (draft|publish|all)")
     p.add_argument("--limit", type=int, default=10, help="Number of posts")
     p.add_argument("--search", help="Search query")
+    p.add_argument("--page", type=int, default=1, help="Page number (1-based)")
+    p.add_argument("--before", help="Return items published before this date (ISO 8601 or YYYY-MM-DD)")
+    p.add_argument("--after", help="Return items published after this date (ISO 8601 or YYYY-MM-DD)")
+    p.add_argument("--orderby", default="date", help="Sort field (date|id|title|slug|modified|include)")
+    p.add_argument("--order", default="desc", help="Sort direction (asc|desc)")
 
     p = posts_sub.add_parser("get", help="Get a single post")
     p.add_argument("id", type=int, help="Post ID")
@@ -586,12 +796,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--content", required=True, help="Post content (HTML)")
     p.add_argument("--status", default="draft", help="Post status (draft|publish)")
     p.add_argument("--categories", help="Comma-separated category IDs")
+    p.add_argument("--slug", help="Custom URL slug")
+    p.add_argument("--parent", type=int, help="Parent post ID")
 
     p = posts_sub.add_parser("update", help="Update a post")
     p.add_argument("id", type=int, help="Post ID")
     p.add_argument("--title", help="New title")
     p.add_argument("--content", help="New content")
     p.add_argument("--status", help="New status")
+    p.add_argument("--slug", help="Custom URL slug")
+    p.add_argument("--parent", type=int, help="Parent post ID")
 
     p = posts_sub.add_parser("delete", help="Delete a post")
     p.add_argument("id", type=int, help="Post ID")
@@ -605,6 +819,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--status", default="publish", help="Filter by status")
     p.add_argument("--limit", type=int, default=10, help="Number of pages")
     p.add_argument("--search", help="Search query")
+    p.add_argument("--page", type=int, default=1, help="Page number (1-based)")
+    p.add_argument("--before", help="Return items published before this date (ISO 8601 or YYYY-MM-DD)")
+    p.add_argument("--after", help="Return items published after this date (ISO 8601 or YYYY-MM-DD)")
+    p.add_argument("--orderby", default="date", help="Sort field (date|id|title|slug|modified|include)")
+    p.add_argument("--order", default="desc", help="Sort direction (asc|desc)")
 
     p = pages_sub.add_parser("get", help="Get a single page")
     p.add_argument("id", type=int, help="Page ID")
@@ -613,12 +832,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--title", required=True, help="Page title")
     p.add_argument("--content", required=True, help="Page content (HTML)")
     p.add_argument("--status", default="draft", help="Page status")
+    p.add_argument("--slug", help="Custom URL slug")
+    p.add_argument("--parent", type=int, help="Parent page ID")
 
     p = pages_sub.add_parser("update", help="Update a page")
     p.add_argument("id", type=int, help="Page ID")
     p.add_argument("--title", help="New title")
     p.add_argument("--content", help="New content")
     p.add_argument("--status", help="New status")
+    p.add_argument("--slug", help="Custom URL slug")
+    p.add_argument("--parent", type=int, help="Parent page ID")
 
     p = pages_sub.add_parser("delete", help="Delete a page")
     p.add_argument("id", type=int, help="Page ID")
@@ -646,14 +869,55 @@ def build_parser() -> argparse.ArgumentParser:
     # --- categories ---
     cat_parser = sub.add_parser("categories", help="List categories")
     cat_parser.add_argument("alias", help="Site alias")
-    cat_sub = cat_parser.add_subparsers(dest="cat_action")
+    cat_sub = cat_parser.add_subparsers(dest="cat_action", required=True)
     cat_sub.add_parser("list", help="List all categories")
 
     # --- tags ---
     tag_parser = sub.add_parser("tags", help="List tags")
     tag_parser.add_argument("alias", help="Site alias")
-    tag_sub = tag_parser.add_subparsers(dest="tag_action")
+    tag_sub = tag_parser.add_subparsers(dest="tag_action", required=True)
     tag_sub.add_parser("list", help="List all tags")
+
+    # --- plugins ---
+    plugins_parser = sub.add_parser("plugins", help="Manage plugins")
+    plugins_parser.add_argument("alias", help="Site alias")
+    plugins_sub = plugins_parser.add_subparsers(dest="plugins_action", required=True)
+
+    p = plugins_sub.add_parser("list", help="List installed plugins")
+    p.add_argument("--status", help="Filter by status (active|inactive)")
+
+    p = plugins_sub.add_parser("get", help="Get plugin details")
+    p.add_argument("plugin", help="Plugin identifier (e.g. akismet/akismet.php)")
+
+    p = plugins_sub.add_parser("activate", help="Activate a plugin")
+    p.add_argument("plugin", help="Plugin identifier (e.g. akismet/akismet.php)")
+
+    p = plugins_sub.add_parser("deactivate", help="Deactivate a plugin")
+    p.add_argument("plugin", help="Plugin identifier (e.g. akismet/akismet.php)")
+
+    # --- themes ---
+    themes_parser = sub.add_parser("themes", help="Manage themes")
+    themes_parser.add_argument("alias", help="Site alias")
+    themes_sub = themes_parser.add_subparsers(dest="themes_action", required=True)
+
+    themes_sub.add_parser("list", help="List installed themes")
+
+    p = themes_sub.add_parser("get", help="Get theme details")
+    p.add_argument("stylesheet", help="Theme stylesheet slug (e.g. hello-elementor-child)")
+
+    p = themes_sub.add_parser("activate", help="Activate a theme")
+    p.add_argument("stylesheet", help="Theme stylesheet slug")
+
+    # --- settings ---
+    settings_parser = sub.add_parser("settings", help="Site settings")
+    settings_parser.add_argument("alias", help="Site alias")
+    settings_sub = settings_parser.add_subparsers(dest="settings_action", required=True)
+
+    settings_sub.add_parser("get", help="Get all site settings")
+
+    p = settings_sub.add_parser("update", help="Update site settings")
+    p.add_argument("--set", action="append", required=True, metavar="key=value",
+                   help="Setting to update (repeatable, e.g. --set blogname=\"My Site\" --set posts_per_page=10)")
 
     # --- gf (Gravity Forms) ---
     gf_parser = sub.add_parser("gf", help="Gravity Forms")
@@ -697,6 +961,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("post_id", type=int, help="Post ID")
     p.add_argument("--title", help="SEO title")
     p.add_argument("--description", help="SEO description")
+    p.add_argument("--keyword", help="Target keyword(s), comma-separated")
+    p.add_argument("--noindex", action="store_true", help="Set noindex on this post")
+    p.add_argument("--index", action="store_true", dest="index", help="Remove noindex (re-index)")
+    p.add_argument("--nofollow", action="store_true", help="Set nofollow on this post")
+    p.add_argument("--follow", action="store_true", help="Remove nofollow")
 
     return parser
 
@@ -754,10 +1023,39 @@ def main():
             cmd_media_delete(args)
 
     elif cmd == "categories":
-        cmd_categories_list(args)
+        if args.cat_action == "list":
+            cmd_categories_list(args)
 
     elif cmd == "tags":
-        cmd_tags_list(args)
+        if args.tag_action == "list":
+            cmd_tags_list(args)
+
+    elif cmd == "plugins":
+        a = args.plugins_action
+        if a == "list":
+            cmd_plugins_list(args)
+        elif a == "get":
+            cmd_plugins_get(args)
+        elif a == "activate":
+            cmd_plugins_activate(args)
+        elif a == "deactivate":
+            cmd_plugins_deactivate(args)
+
+    elif cmd == "themes":
+        a = args.themes_action
+        if a == "list":
+            cmd_themes_list(args)
+        elif a == "get":
+            cmd_themes_get(args)
+        elif a == "activate":
+            cmd_themes_activate(args)
+
+    elif cmd == "settings":
+        a = args.settings_action
+        if a == "get":
+            cmd_settings_get(args)
+        elif a == "update":
+            cmd_settings_update(args)
 
     elif cmd == "gf":
         a = args.gf_action
