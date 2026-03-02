@@ -10,7 +10,7 @@ Manage Redis instances through connection profiles. Supports key inspection, str
 ## Usage
 
 ```bash
-REDIS="uv run ~/.openclaw/skills/redis-cli/scripts/redis-cli.py"
+REDIS="uv run ~/.claude/skills/redis-cli/scripts/redis-cli.py"
 ```
 
 ## Commands
